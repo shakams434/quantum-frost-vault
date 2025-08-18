@@ -19,6 +19,7 @@ interface EntropyMetrics {
 }
 
 export default function Onboarding() {
+  console.log("Onboarding component rendering");
   const [usePRNG, setUsePRNG] = useState(true)
   const [bits, setBits] = useState("")
   const [metrics, setMetrics] = useState<EntropyMetrics | null>(null)
