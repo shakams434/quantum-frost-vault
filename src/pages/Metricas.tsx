@@ -283,7 +283,7 @@ export default function Metricas() {
             <Alert>
               <Shield className="h-4 w-4" />
               <AlertDescription>
-                <strong>FROST 2-de-3:</strong> Elimina punto único de fallo. Latencia <1.2s aceptable para operaciones críticas.
+                <strong>FROST 2-de-3:</strong> Elimina punto único de fallo. Latencia &lt;1.2s aceptable para operaciones críticas.
               </AlertDescription>
             </Alert>
 

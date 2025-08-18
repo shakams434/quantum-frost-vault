@@ -40,7 +40,7 @@ const items = [
 ]
 
 export function AppSidebar() {
-  const { collapsed } = useSidebar()
+  const { state } = useSidebar()
   const location = useLocation()
   const currentPath = location.pathname
 
@@ -49,10 +49,10 @@ export function AppSidebar() {
     isActive ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" : "hover:bg-sidebar-accent/50"
 
   return (
-    <Sidebar className={collapsed ? "w-14" : "w-64"} collapsible>
+    <Sidebar collapsible="icon">
       <SidebarContent>
         <div className="p-4 border-b border-sidebar-border">
-          {!collapsed && (
+          {state === "expanded" && (
             <div>
               <h2 className="text-lg font-semibold text-sidebar-foreground">PoC Custodia</h2>
               <p className="text-sm text-sidebar-foreground/70">QRNG + FROST + VC</p>
@@ -69,7 +69,7 @@ export function AppSidebar() {
                   <SidebarMenuButton asChild>
                     <NavLink to={item.url} end className={getNavCls}>
                       <item.icon className="h-4 w-4" />
-                      {!collapsed && (
+                      {state === "expanded" && (
                         <div className="flex flex-col">
                           <span className="text-sm">{item.title}</span>
                           <span className="text-xs text-sidebar-foreground/60">{item.description}</span>
