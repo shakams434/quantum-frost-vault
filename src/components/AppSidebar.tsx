@@ -1,4 +1,4 @@
-import { Key, FileCheck, Users, BarChart3 } from "lucide-react"
+import { Key, Users, BarChart3 } from "lucide-react"
 import { NavLink, useLocation } from "react-router-dom"
 import {
   Sidebar,
@@ -18,12 +18,6 @@ const items = [
     url: "/", 
     icon: Key,
     description: "Generación PRNG vs QRNG" 
-  },
-  { 
-    title: "Credenciales Verificables", 
-    url: "/credenciales", 
-    icon: FileCheck,
-    description: "Emisión y verificación VC" 
   },
   { 
     title: "Firma Distribuida FROST", 
