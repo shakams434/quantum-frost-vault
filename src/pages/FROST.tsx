@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Users, Shield, Key, Clock, AlertTriangle, CheckCircle, XCircle } from "lucide-react"
+import N8nWebhookWidget from "@/components/N8nWebhookWidget"
 
 interface Participant {
   id: string
@@ -372,6 +373,9 @@ export default function FROST() {
           </div>
         </CardContent>
       </Card>
+
+      {/* n8n Webhook Widget */}
+      <N8nWebhookWidget />
     </div>
   )
 }
