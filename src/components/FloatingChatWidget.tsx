@@ -31,7 +31,7 @@ export default function FloatingChatWidget() {
 
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
     }
   }, [messages])
 
@@ -139,8 +139,8 @@ export default function FloatingChatWidget() {
           </CardHeader>
           
           <CardContent className="flex-1 flex flex-col p-0">
-            <ScrollArea className="flex-1 px-4" ref={scrollRef}>
-              <div className="space-y-4 pb-4">
+            <ScrollArea className="flex-1 px-4">
+              <div className="space-y-4 pb-4" ref={scrollRef}>
                 {messages.map((msg) => (
                   <div
                     key={msg.id}
