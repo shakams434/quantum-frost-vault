@@ -1,5 +1,6 @@
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/AppSidebar"
+import FloatingChatWidget from "@/components/FloatingChatWidget"
 import { ReactNode } from "react"
 
 interface LayoutProps {
@@ -38,6 +39,7 @@ export default function Layout({ children }: LayoutProps) {
           </footer>
         </div>
       </div>
+      <FloatingChatWidget />
     </SidebarProvider>
   )
 }
