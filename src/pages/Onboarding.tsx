@@ -1,279 +1,474 @@
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
-import { Badge } from "@/components/ui/badge"
-import { AlertCircle, Key, Zap, Shield } from "lucide-react"
+import { AlertCircle, Key, Copy, Trash2, Download } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { toast } from "@/hooks/use-toast"
+import * as ed25519 from '@noble/ed25519'
+import { base58btc } from 'multiformats/bases/base58'
 
-interface EntropyMetrics {
-  shannon: number
-  monobit: number
-  runs: number
-  quality: number
-  generationTime: number
-  onesPercent: number
-  zerosPercent: number
+// Utility functions
+function rand32(): Uint8Array { 
+  const a = new Uint8Array(32); 
+  crypto.getRandomValues(a); 
+  return a; 
 }
+
+const toHex = (u: Uint8Array) => [...u].map(b => b.toString(16).padStart(2, '0')).join('');
+const toBits = (u: Uint8Array) => [...u].map(b => b.toString(2).padStart(8, '0')).join('');
+const toBase64 = (u: Uint8Array) => btoa(String.fromCharCode(...u));
 
 export default function Onboarding() {
   console.log("Onboarding component rendering");
-  const [usePRNG, setUsePRNG] = useState(true)
-  const [bits, setBits] = useState("")
-  const [metrics, setMetrics] = useState<EntropyMetrics | null>(null)
+  
+  // State for seed and cryptographic data
+  const [seed, setSeed] = useState<Uint8Array | null>(null)
+  const [privateKey, setPrivateKey] = useState<Uint8Array | null>(null)
+  const [publicKey, setPublicKey] = useState<Uint8Array | null>(null)
+  const [didKey, setDidKey] = useState("")
   const [userDID, setUserDID] = useState("")
-  const [isGenerating, setIsGenerating] = useState(false)
 
-  // Linear Congruential Generator (weak PRNG)
-  const generateLCGBits = (seed: number, count: number): string => {
-    let current = seed
-    let result = ""
-    const a = 1664525
-    const c = 1013904223
-    const m = Math.pow(2, 32)
-    
-    for (let i = 0; i < count; i++) {
-      current = (a * current + c) % m
-      result += (current % 2).toString()
-    }
-    return result
+  // Generate 256-bit cryptographic seed
+  const generateSeed = () => {
+    const newSeed = rand32()
+    setSeed(newSeed)
+    // Clear derived keys when generating new seed
+    setPrivateKey(null)
+    setPublicKey(null)
+    setDidKey("")
+    setUserDID("")
+    toast({
+      title: "Semilla generada",
+      description: "Se generó una nueva semilla criptográfica de 256 bits"
+    })
   }
 
-  // Strong random using crypto API
-  const generateQRNGBits = (count: number): string => {
-    const bytes = new Uint8Array(Math.ceil(count / 8))
-    crypto.getRandomValues(bytes)
-    let result = ""
-    for (let i = 0; i < count; i++) {
-      const byteIndex = Math.floor(i / 8)
-      const bitIndex = i % 8
-      const bit = (bytes[byteIndex] >> bitIndex) & 1
-      result += bit.toString()
-    }
-    return result.slice(0, count)
-  }
-
-  const calculateEntropy = (bits: string): EntropyMetrics => {
-    const start = performance.now()
+  // Derive Ed25519 keys from seed
+  const deriveKeys = async () => {
+    if (!seed) return
     
-    const ones = bits.split('1').length - 1
-    const zeros = bits.split('0').length - 1
-    const total = bits.length
-    
-    // Shannon entropy
-    const p1 = ones / total
-    const p0 = zeros / total
-    const shannon = -(p1 * Math.log2(p1 || 1) + p0 * Math.log2(p0 || 1))
-    
-    // Monobit test (should be close to 0.5)
-    const monobit = Math.abs(0.5 - p1)
-    
-    // Runs test (simplified)
-    let runs = 1
-    for (let i = 1; i < bits.length; i++) {
-      if (bits[i] !== bits[i - 1]) runs++
-    }
-    const expectedRuns = 2 * p1 * p0 * total + 1
-    const runsTest = Math.abs(runs - expectedRuns) / Math.sqrt(expectedRuns)
-    
-    // Quality score (0-100)
-    const entropyScore = (shannon / 1) * 40
-    const monobitScore = (1 - monobit * 2) * 30
-    const runsScore = Math.max(0, (1 - runsTest / 10)) * 30
-    const quality = Math.min(100, entropyScore + monobitScore + runsScore)
-    
-    const generationTime = performance.now() - start
-    
-    return {
-      shannon: Number(shannon.toFixed(4)),
-      monobit: Number(monobit.toFixed(4)),
-      runs: Number(runsTest.toFixed(2)),
-      quality: Number(quality.toFixed(1)),
-      generationTime: Number(generationTime.toFixed(2)),
-      onesPercent: Number((p1 * 100).toFixed(1)),
-      zerosPercent: Number((p0 * 100).toFixed(1))
+    try {
+      // For Ed25519, the private key IS the seed (32 bytes)
+      const newPrivateKey = seed
+      const newPublicKey = await ed25519.getPublicKey(newPrivateKey)
+      
+      setPrivateKey(newPrivateKey)
+      setPublicKey(new Uint8Array(newPublicKey))
+      
+      toast({
+        title: "Claves derivadas",
+        description: "Se derivaron las claves Ed25519 desde la semilla"
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudieron derivar las claves",
+        variant: "destructive"
+      })
     }
   }
 
-  const generateBits = async () => {
-    setIsGenerating(true)
-    await new Promise(resolve => setTimeout(resolve, 100)) // Simulate processing
+  // Build DID did:key
+  const buildDidKey = () => {
+    if (!publicKey) return
     
-    const generatedBits = usePRNG 
-      ? generateLCGBits(12345, 1024) // Fixed seed for demo
-      : generateQRNGBits(1024)
+    try {
+      const MULTICODEC_ED25519_PUB = new Uint8Array([0xED, 0x01])
+      const didPayload = new Uint8Array(2 + publicKey.length)
+      didPayload.set(MULTICODEC_ED25519_PUB, 0)
+      didPayload.set(publicKey, 2)
+      const multibasePub = 'z' + base58btc.encode(didPayload)
+      const did = `did:key:${multibasePub}`
+      
+      setDidKey(did)
+      toast({
+        title: "DID construido",
+        description: "Se construyó el DID did:key desde la clave pública"
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudo construir el DID",
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Generate user DID from existing did:key
+  const generateUserDID = () => {
+    if (didKey) {
+      setUserDID(didKey)
+      toast({
+        title: "DID de usuario generado",
+        description: "Se asignó el did:key como DID del usuario"
+      })
+    }
+  }
+
+  // Clear all data from memory
+  const clearMemory = () => {
+    setSeed(null)
+    setPrivateKey(null)
+    setPublicKey(null)
+    setDidKey("")
+    setUserDID("")
+    toast({
+      title: "Memoria limpiada",
+      description: "Se borró toda la información criptográfica"
+    })
+  }
+
+  // Copy to clipboard
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text)
+    toast({
+      title: "Copiado",
+      description: `${label} copiado al portapapeles`
+    })
+  }
+
+  // Download JSON
+  const downloadJson = () => {
+    if (!seed) return
     
-    setBits(generatedBits)
-    setMetrics(calculateEntropy(generatedBits))
-    setIsGenerating(false)
-  }
-
-  const createUserDID = () => {
-    const uuid = crypto.randomUUID()
-    setUserDID(`did:demo:user:${uuid}`)
-  }
-
-  const getQualityColor = (quality: number) => {
-    if (quality >= 80) return "text-green-600"
-    if (quality >= 60) return "text-yellow-600"
-    return "text-red-600"
-  }
-
-  const getQualityVariant = (quality: number) => {
-    if (quality >= 80) return "default"
-    if (quality >= 60) return "secondary"
-    return "destructive"
+    const data = {
+      seed_hex: seed ? toHex(seed) : "",
+      private_key_seed_hex: privateKey ? toHex(privateKey) : "",
+      public_key_hex: publicKey ? toHex(publicKey) : "",
+      did_key: didKey,
+      verificationMethod: didKey ? {
+        id: `${didKey}#${didKey.split(':')[2]}`,
+        type: "Ed25519VerificationKey2020",
+        publicKeyMultibase: didKey.split(':')[2]
+      } : null
+    }
+    
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'ed25519-keys.json'
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Generator Configuration */}
+      {/* Disclaimer */}
+      <Alert>
+        <AlertCircle className="h-4 w-4" />
+        <AlertDescription>
+          PoC educativa. Generación de semilla local (WebCrypto). No usar en producción.
+        </AlertDescription>
+      </Alert>
+
+      {/* Clear Memory Button */}
+      <div className="flex justify-end">
+        <Button onClick={clearMemory} variant="destructive" size="sm">
+          <Trash2 className="h-4 w-4 mr-2" />
+          Borrar en memoria
+        </Button>
+      </div>
+
+      <div className="grid gap-6">
+        {/* Cryptographic Seed (256 bits = 32 bytes) */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Zap className="h-5 w-5" />
-              Configuración del Generador
-            </CardTitle>
+            <CardTitle>Semilla criptográfica (256 bits = 32 bytes)</CardTitle>
             <CardDescription>
-              Selecciona el tipo de generador de números aleatorios
+              Se genera localmente con window.crypto.getRandomValues. Esta semilla se usa tal cual para Ed25519.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <Switch
-                id="prng-toggle"
-                checked={!usePRNG}
-                onCheckedChange={(checked) => setUsePRNG(!checked)}
-              />
-              <Label htmlFor="prng-toggle" className="text-sm">
-                {usePRNG ? "PRNG débil (LCG)" : "QRNG (simulada)"}
-              </Label>
-            </div>
-            
-            {!usePRNG && (
-              <Alert>
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  Simulada, no hardware cuántico real
-                </AlertDescription>
-              </Alert>
-            )}
-
-            <Button 
-              onClick={generateBits} 
-              disabled={isGenerating}
-              className="w-full"
-            >
-              {isGenerating ? "Generando..." : "Generar 1024 bits"}
+            <Button onClick={generateSeed} className="w-full">
+              Generar semilla (256 bits)
             </Button>
 
-            {bits && (
-              <div className="p-3 bg-muted rounded-md">
-                <Label className="text-xs text-muted-foreground">Bits generados (primeros 64):</Label>
-                <p className="font-mono text-xs break-all mt-1">
-                  {bits.slice(0, 64)}...
-                </p>
+            {seed && (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <Label className="text-sm font-medium">Bits (256):</Label>
+                  </div>
+                  <div className="p-3 bg-muted rounded-md">
+                    <p className="font-mono text-xs break-all">
+                      {toBits(seed)}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <Label className="text-sm font-medium">Hex (64 chars):</Label>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => copyToClipboard(toHex(seed), "Hex")}
+                    >
+                      <Copy className="h-3 w-3 mr-1" />
+                      Copiar
+                    </Button>
+                  </div>
+                  <div className="p-3 bg-muted rounded-md">
+                    <p className="font-mono text-sm break-all">
+                      {toHex(seed)}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <Label className="text-sm font-medium">Base64:</Label>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => copyToClipboard(toBase64(seed), "Base64")}
+                    >
+                      <Copy className="h-3 w-3 mr-1" />
+                      Copiar
+                    </Button>
+                  </div>
+                  <div className="p-3 bg-muted rounded-md">
+                    <p className="font-mono text-sm break-all">
+                      {toBase64(seed)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button variant="secondary" onClick={() => setSeed(null)}>
+                    Limpiar
+                  </Button>
+                  <Button variant="secondary" onClick={downloadJson}>
+                    <Download className="h-4 w-4 mr-2" />
+                    Descargar JSON
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Entropy Metrics */}
+        {/* Ed25519 Keys */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="h-5 w-5" />
-              Métricas de Entropía
-            </CardTitle>
+            <CardTitle>Claves Ed25519</CardTitle>
             <CardDescription>
-              Análisis de calidad de aleatoriedad
+              Ed25519 usa semilla de 32 bytes; internamente (SHA-512 + clamping) deriva el escalar secreto.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {metrics ? (
-              <>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm">Entropía de Shannon:</span>
-                    <Badge variant="outline">{metrics.shannon}</Badge>
+            <Button 
+              onClick={deriveKeys} 
+              disabled={!seed}
+              className="w-full"
+            >
+              Derivar clave privada (desde la semilla de 32B)
+            </Button>
+
+            {privateKey && (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <Label className="text-sm font-medium">Private key (seed) – 32 bytes (hex):</Label>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => copyToClipboard(toHex(privateKey), "Clave privada")}
+                    >
+                      <Copy className="h-3 w-3 mr-1" />
+                      Copiar
+                    </Button>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm">Test Monobit:</span>
-                    <Badge variant="outline">{metrics.monobit}</Badge>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm">Test de rachas:</span>
-                    <Badge variant="outline">{metrics.runs}</Badge>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm">Tiempo generación:</span>
-                    <Badge variant="outline">{metrics.generationTime}ms</Badge>
+                  <div className="p-3 bg-muted rounded-md">
+                    <p className="font-mono text-sm break-all">
+                      {toHex(privateKey)}
+                    </p>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>Calidad de aleatoriedad</span>
-                    <span className={getQualityColor(metrics.quality)}>
-                      {metrics.quality}%
-                    </span>
-                  </div>
-                  <Progress 
-                    value={metrics.quality} 
-                    className="h-3"
-                  />
-                </div>
+                {publicKey && (
+                  <>
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <Label className="text-sm font-medium">Public key – 32 bytes (hex):</Label>
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => copyToClipboard(toHex(publicKey), "Clave pública")}
+                        >
+                          <Copy className="h-3 w-3 mr-1" />
+                          Copiar
+                        </Button>
+                      </div>
+                      <div className="p-3 bg-muted rounded-md">
+                        <p className="font-mono text-sm break-all">
+                          {toHex(publicKey)}
+                        </p>
+                      </div>
+                    </div>
 
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="text-center p-2 bg-muted rounded">
-                    <div className="font-semibold">{metrics.onesPercent}%</div>
-                    <div className="text-muted-foreground">Unos</div>
-                  </div>
-                  <div className="text-center p-2 bg-muted rounded">
-                    <div className="font-semibold">{metrics.zerosPercent}%</div>
-                    <div className="text-muted-foreground">Ceros</div>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <p className="text-muted-foreground text-center py-8">
-                Genera bits para ver las métricas
-              </p>
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <Label className="text-sm font-medium">Public key (base64):</Label>
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => copyToClipboard(toBase64(publicKey), "Clave pública base64")}
+                        >
+                          <Copy className="h-3 w-3 mr-1" />
+                          Copiar
+                        </Button>
+                      </div>
+                      <div className="p-3 bg-muted rounded-md">
+                        <p className="font-mono text-sm break-all">
+                          {toBase64(publicKey)}
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* DID did:key (Ed25519) */}
+        <Card>
+          <CardHeader>
+            <CardTitle>DID did:key (Ed25519)</CardTitle>
+            <CardDescription>
+              did:key = multicodec 0xED01 + publicKey(32B) → base58btc con prefijo z (multibase).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Button 
+              onClick={buildDidKey} 
+              disabled={!publicKey}
+              className="w-full"
+            >
+              Construir DID did:key
+            </Button>
+
+            {didKey && publicKey && (
+              <div className="space-y-4">
+                <div>
+                  <Label className="text-sm font-medium mb-2 block">Pasos y valores:</Label>
+                  <div className="space-y-2 text-sm">
+                    <p><strong>Prefijo multicodec ed25519-pub:</strong> 0xED 0x01 (2B)</p>
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <span><strong>Payload (34B) = prefijo + publicKey:</strong></span>
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => {
+                            const MULTICODEC_ED25519_PUB = new Uint8Array([0xED, 0x01])
+                            const didPayload = new Uint8Array(2 + publicKey.length)
+                            didPayload.set(MULTICODEC_ED25519_PUB, 0)
+                            didPayload.set(publicKey, 2)
+                            copyToClipboard(toHex(didPayload), "Payload")
+                          }}
+                        >
+                          <Copy className="h-3 w-3 mr-1" />
+                          Copiar
+                        </Button>
+                      </div>
+                      <div className="p-2 bg-muted rounded text-xs font-mono break-all">
+                        {(() => {
+                          const MULTICODEC_ED25519_PUB = new Uint8Array([0xED, 0x01])
+                          const didPayload = new Uint8Array(2 + publicKey.length)
+                          didPayload.set(MULTICODEC_ED25519_PUB, 0)
+                          didPayload.set(publicKey, 2)
+                          return toHex(didPayload)
+                        })()}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <span><strong>Multibase (base58btc):</strong></span>
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => copyToClipboard(didKey.split(':')[2], "Multibase")}
+                        >
+                          <Copy className="h-3 w-3 mr-1" />
+                          Copiar
+                        </Button>
+                      </div>
+                      <div className="p-2 bg-muted rounded text-xs font-mono break-all">
+                        {didKey.split(':')[2]}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <Label className="text-sm font-medium">DID final:</Label>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => copyToClipboard(didKey, "DID")}
+                    >
+                      <Copy className="h-3 w-3 mr-1" />
+                      Copiar
+                    </Button>
+                  </div>
+                  <div className="p-3 bg-muted rounded-md">
+                    <p className="font-mono text-sm break-all">
+                      {didKey}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* User Identity */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Key className="h-5 w-5" />
+              Identidad del Usuario
+            </CardTitle>
+            <CardDescription>
+              Generar did:key desde la clave pública
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <Button 
+                onClick={generateUserDID} 
+                disabled={!didKey}
+                className="w-full"
+              >
+                Generar did:key (desde la clave pública)
+              </Button>
+              
+              {userDID && (
+                <div>
+                  <Label className="text-xs text-muted-foreground">DID generado:</Label>
+                  <div className="flex gap-2 mt-1">
+                    <div className="flex-1 p-2 bg-muted rounded font-mono text-sm break-all">
+                      {userDID}
+                    </div>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => copyToClipboard(userDID, "DID del usuario")}
+                    >
+                      <Copy className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
-
-      {/* User DID Creation */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Key className="h-5 w-5" />
-            Identidad del Usuario
-          </CardTitle>
-          <CardDescription>
-            Crear DID (Decentralized Identifier) del usuario
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-4 items-center">
-            <Button onClick={createUserDID}>
-              Crear DID del usuario
-            </Button>
-            {userDID && (
-              <div className="flex-1">
-                <Label className="text-xs text-muted-foreground">DID generado:</Label>
-                <p className="font-mono text-sm bg-muted p-2 rounded mt-1 break-all">
-                  {userDID}
-                </p>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   )
 }
