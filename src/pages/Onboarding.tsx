@@ -221,13 +221,6 @@ export default function Onboarding() {
 
   return (
     <div className="space-y-6">
-      {/* Disclaimer */}
-      <Alert>
-        <AlertCircle className="h-4 w-4" />
-        <AlertDescription>
-          PoC educativa. Generación de semilla local (WebCrypto). No usar en producción.
-        </AlertDescription>
-      </Alert>
 
       {/* Clear Memory Button */}
       <div className="flex justify-end">
