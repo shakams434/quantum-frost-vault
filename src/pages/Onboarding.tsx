@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label"
 import { AlertCircle, Key, Copy, Trash2, Download } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "@/hooks/use-toast"
-import * as ed25519 from '@noble/ed25519'
+import { getPublicKey } from '@noble/ed25519'
 import { base58btc } from 'multiformats/bases/base58'
 
 // Utility functions
@@ -49,9 +49,15 @@ export default function Onboarding() {
     if (!seed) return
     
     try {
+      console.log("Deriving keys from seed:", toHex(seed))
+      
       // For Ed25519, the private key IS the seed (32 bytes)
       const newPrivateKey = seed
-      const newPublicKey = await ed25519.getPublicKey(newPrivateKey)
+      console.log("Private key (seed):", toHex(newPrivateKey))
+      
+      // Use the new API from @noble/ed25519 v3.0.0
+      const newPublicKey = await getPublicKey(newPrivateKey)
+      console.log("Public key derived:", toHex(new Uint8Array(newPublicKey)))
       
       setPrivateKey(newPrivateKey)
       setPublicKey(new Uint8Array(newPublicKey))
@@ -61,9 +67,10 @@ export default function Onboarding() {
         description: "Se derivaron las claves Ed25519 desde la semilla"
       })
     } catch (error) {
+      console.error("Error deriving keys:", error)
       toast({
         title: "Error",
-        description: "No se pudieron derivar las claves",
+        description: `No se pudieron derivar las claves: ${error.message || error}`,
         variant: "destructive"
       })
     }
