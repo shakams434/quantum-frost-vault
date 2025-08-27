@@ -2,11 +2,20 @@ import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { AlertCircle, Key, Copy, Trash2, Download } from "lucide-react"
+import { AlertCircle, Key, Copy, Trash2, Download, Save } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "@/hooks/use-toast"
 import { ed } from '../crypto-setup'
 import { base58btc } from 'multiformats/bases/base58'
+import { identityStorage } from "@/services/identityStorage"
+import { 
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 
 // Utility functions
 function rand32(): Uint8Array { 
@@ -28,11 +37,17 @@ export default function Onboarding() {
   const [publicKey, setPublicKey] = useState<Uint8Array | null>(null)
   const [didKey, setDidKey] = useState("")
   const [userDID, setUserDID] = useState("")
+  const [generationMethod, setGenerationMethod] = useState<'QRNG' | 'PRNG'>('PRNG')
+  
+  // State for save dialog
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+  const [identityName, setIdentityName] = useState("")
 
   // Generate 256-bit cryptographic seed
   const generateSeed = (method: 'QRNG' | 'PRNG') => {
     const newSeed = rand32()
     setSeed(newSeed)
+    setGenerationMethod(method)
     // Clear derived keys when generating new seed
     setPrivateKey(null)
     setPublicKey(null)
@@ -112,6 +127,49 @@ export default function Onboarding() {
     }
   }
 
+  // Save identity to storage
+  const saveIdentity = () => {
+    if (!seed || !privateKey || !publicKey || !userDID) {
+      toast({
+        title: "Error",
+        description: "Faltan datos para guardar la identidad",
+        variant: "destructive"
+      })
+      return
+    }
+
+    try {
+      const multibase = userDID.split(':')[2]
+      const vmId = `${userDID}#${multibase}`
+      
+      const identityId = identityStorage.saveIdentity({
+        customName: identityName.trim() || undefined,
+        didKey: userDID,
+        seed: toHex(seed),
+        privateKey: toHex(privateKey),
+        publicKey: toHex(publicKey),
+        multibase,
+        vmId,
+        createdAt: new Date().toISOString(),
+        generationType: generationMethod
+      })
+
+      toast({
+        title: "Identidad guardada",
+        description: `Identidad guardada correctamente${identityName ? ` como "${identityName}"` : ''}`
+      })
+
+      setShowSaveDialog(false)
+      setIdentityName("")
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudo guardar la identidad",
+        variant: "destructive"
+      })
+    }
+  }
+
   // Clear all data from memory
   const clearMemory = () => {
     setSeed(null)
@@ -119,6 +177,8 @@ export default function Onboarding() {
     setPublicKey(null)
     setDidKey("")
     setUserDID("")
+    setGenerationMethod('PRNG')
+    setIdentityName("")
     toast({
       title: "Memoria limpiada",
       description: "Se borró toda la información criptográfica"
@@ -460,26 +520,86 @@ export default function Onboarding() {
               </Button>
               
               {userDID && (
-                <div>
-                  <Label className="text-xs text-muted-foreground">DID generado:</Label>
-                  <div className="flex gap-2 mt-1">
-                    <div className="flex-1 p-2 bg-muted rounded font-mono text-sm break-all">
-                      {userDID}
+                <div className="space-y-3">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">DID generado:</Label>
+                    <div className="flex gap-2 mt-1">
+                      <div className="flex-1 p-2 bg-muted rounded font-mono text-sm break-all">
+                        {userDID}
+                      </div>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => copyToClipboard(userDID, "DID del usuario")}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
                     </div>
-                    <Button 
-                      size="sm" 
-                      variant="outline"
-                      onClick={() => copyToClipboard(userDID, "DID del usuario")}
-                    >
-                      <Copy className="h-3 w-3" />
-                    </Button>
                   </div>
+                  
+                  <Button 
+                    onClick={() => setShowSaveDialog(true)} 
+                    className="w-full"
+                    variant="default"
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    Guardar en Mis Identidades
+                  </Button>
                 </div>
               )}
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Save Identity Dialog */}
+      <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Guardar identidad</DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="identity-name">Nombre para esta identidad (opcional)</Label>
+              <Input
+                id="identity-name"
+                value={identityName}
+                onChange={(e) => setIdentityName(e.target.value)}
+                placeholder="Ej: Mi identidad personal, Wallet principal..."
+                maxLength={50}
+                autoFocus
+              />
+              <p className="text-xs text-muted-foreground">
+                Puedes dejar vacío para guardarlo sin nombre personalizado.
+              </p>
+            </div>
+
+            <div className="p-3 bg-muted/30 rounded-md border">
+              <div className="space-y-2 text-xs">
+                <div>
+                  <span className="text-muted-foreground">DID:</span>
+                  <p className="font-mono break-all">{userDID}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Tipo:</span>
+                  <span className="ml-1 font-medium">{generationMethod}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowSaveDialog(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={saveIdentity}>
+              <Save className="h-4 w-4 mr-2" />
+              Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

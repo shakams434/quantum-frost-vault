@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Layout from "./components/Layout";
 import Onboarding from "./pages/Onboarding";
+import Identidades from "./pages/Identidades";
 import FROST from "./pages/FROST";
 import Metricas from "./pages/Metricas";
 import NotFound from "./pages/NotFound";
@@ -26,6 +27,7 @@ const App = () => {
             <Layout>
               <Routes>
                 <Route path="/" element={<Onboarding />} />
+                <Route path="/identidades" element={<Identidades />} />
                 <Route path="/frost" element={<FROST />} />
                 <Route path="/metricas" element={<Metricas />} />
                 <Route path="*" element={<NotFound />} />

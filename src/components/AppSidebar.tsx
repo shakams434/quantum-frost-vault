@@ -1,4 +1,4 @@
-import { Key, Users, BarChart3 } from "lucide-react"
+import { Key, Users, BarChart3, Wallet } from "lucide-react"
 import { NavLink, useLocation } from "react-router-dom"
 import {
   Sidebar,
@@ -18,6 +18,12 @@ const items = [
     url: "/", 
     icon: Key,
     description: "Generación PRNG vs QRNG" 
+  },
+  { 
+    title: "Gestión de Identidades", 
+    url: "/identidades", 
+    icon: Wallet,
+    description: "Mis claves y DIDs" 
   },
   { 
     title: "Firma Distribuida FROST", 
