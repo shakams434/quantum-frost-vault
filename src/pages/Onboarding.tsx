@@ -30,7 +30,7 @@ export default function Onboarding() {
   const [userDID, setUserDID] = useState("")
 
   // Generate 256-bit cryptographic seed
-  const generateSeed = () => {
+  const generateSeed = (method: 'QRNG' | 'PRNG') => {
     const newSeed = rand32()
     setSeed(newSeed)
     // Clear derived keys when generating new seed
@@ -40,7 +40,7 @@ export default function Onboarding() {
     setUserDID("")
     toast({
       title: "Semilla generada",
-      description: "Se generó una nueva semilla criptográfica de 256 bits"
+      description: `Se generó una nueva semilla criptográfica de 256 bits usando ${method}`
     })
   }
 
@@ -181,9 +181,14 @@ export default function Onboarding() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button onClick={generateSeed} className="w-full">
-              Generar semilla (256 bits)
-            </Button>
+            <div className="grid grid-cols-2 gap-4">
+              <Button onClick={() => generateSeed('QRNG')} className="w-full">
+                QRNG (256 bits)
+              </Button>
+              <Button onClick={() => generateSeed('PRNG')} className="w-full" variant="outline">
+                PRNG Simulado (256 bits)
+              </Button>
+            </div>
 
             {seed && (
               <div className="space-y-4">
