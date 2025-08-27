@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label"
 import { AlertCircle, Key, Copy, Trash2, Download } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "@/hooks/use-toast"
-import * as ed25519 from '@noble/ed25519'
+import { ed } from '../crypto-setup'
 import { base58btc } from 'multiformats/bases/base58'
 
 // Utility functions
@@ -53,10 +53,9 @@ export default function Onboarding() {
       
       // For Ed25519, the private key IS the seed (32 bytes)
       const newPrivateKey = seed
-      console.log("Private key (seed):", toHex(newPrivateKey))
+      const newPublicKey = await ed.getPublicKey(newPrivateKey)
       
-      // Use @noble/ed25519 v2.1.0 API
-      const newPublicKey = await ed25519.getPublicKey(newPrivateKey)
+      console.log("Private key (seed):", toHex(newPrivateKey))
       console.log("Public key derived:", toHex(new Uint8Array(newPublicKey)))
       
       setPrivateKey(newPrivateKey)
