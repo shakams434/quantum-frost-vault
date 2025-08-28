@@ -86,9 +86,13 @@ export async function keypairFromSeed(seed32: Uint8Array): Promise<DilithiumKeyP
  * Valida que un par de claves sea válido
  */
 export function validateKeyPair(publicKey: Uint8Array, secretKey: Uint8Array): boolean {
-  // Dilithium2 (ML-DSA-44) tamaños esperados según NIST
-  const EXPECTED_PUBLIC_KEY_SIZE = 1312;  // bytes
-  const EXPECTED_SECRET_KEY_SIZE = 2528;  // bytes
+  // Dilithium2 tamaños reales de la librería dilithium-crystals
+  const EXPECTED_PUBLIC_KEY_SIZE = 2592;  // bytes (tamaño real de la librería)
+  const EXPECTED_SECRET_KEY_SIZE = 4864;  // bytes (tamaño real de la librería)
+  
+  console.log(`🔍 Validando tamaños de clave:`);
+  console.log(`   Clave pública: ${publicKey.length} bytes (esperado: ${EXPECTED_PUBLIC_KEY_SIZE})`);
+  console.log(`   Clave privada: ${secretKey.length} bytes (esperado: ${EXPECTED_SECRET_KEY_SIZE})`);
   
   if (publicKey.length !== EXPECTED_PUBLIC_KEY_SIZE) {
     console.warn(`⚠️ Tamaño de clave pública inesperado: ${publicKey.length}, esperado: ${EXPECTED_PUBLIC_KEY_SIZE}`);
@@ -100,6 +104,7 @@ export function validateKeyPair(publicKey: Uint8Array, secretKey: Uint8Array): b
     return false;
   }
   
+  console.log(`✅ Validación de tamaños exitosa`);
   return true;
 }
 
@@ -109,8 +114,8 @@ export function validateKeyPair(publicKey: Uint8Array, secretKey: Uint8Array): b
 export function getDilithiumKeyInfo() {
   return {
     algorithm: "CRYSTALS-Dilithium2 (ML-DSA-44)",
-    publicKeySize: 1312,  // bytes
-    secretKeySize: 2528,  // bytes
+    publicKeySize: 2592,  // bytes (tamaño real de dilithium-crystals)
+    secretKeySize: 4864,  // bytes (tamaño real de dilithium-crystals)
     signatureSize: 2420,  // bytes (aproximado)
     securityLevel: "NIST Level 2 (equivalent to AES-128)",
     quantumResistant: true,
