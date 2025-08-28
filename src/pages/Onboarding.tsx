@@ -21,7 +21,10 @@ import {
 import { Input } from "@/components/ui/input"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
-// Lazy load Dilithium for code splitting (removed since we're using direct import)
+// Post-quantum crypto imports
+import { keypairFromSeed, validateKeyPair, getDilithiumKeyInfo } from "@/pqc/dilithium2";
+import { dilithiumSign, dilithiumVerify, selfTest } from "@/pqc/sign-verify";
+import { didKeyDilithium, fromHex, constantTimeEquals, toHex as pqcToHex, toBase64 as pqcToBase64 } from "@/utils/pqc-utils";
 
 // Utility functions
 function rand32(): Uint8Array { 
@@ -159,6 +162,17 @@ export default function Onboarding() {
   // State for save dialog
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [identityName, setIdentityName] = useState("")
+  
+  // Estados para prueba de firma Dilithium2
+  const [testMessage, setTestMessage] = useState("Hello, Post-Quantum World!")
+  const [testSignature, setTestSignature] = useState<{
+    hex: string;
+    base64: string;
+    bytes: Uint8Array | null;
+  } | null>(null)
+  const [isSigningTest, setIsSigningTest] = useState(false)
+  const [testVerifyResult, setTestVerifyResult] = useState<string | null>(null)
+  const [deterministicTestResult, setDeterministicTestResult] = useState<string | null>(null)
 
   // Generate 256-bit cryptographic seed
   const generateSeed = async (method: 'QRNG' | 'PRNG') => {
@@ -464,6 +478,157 @@ export default function Onboarding() {
       description: "El archivo JSON con las claves ha sido descargado."
     })
   }
+
+  // Test de determinismo para Dilithium2
+  const testDeterminism = async (seedBytes: Uint8Array, originalKeyPair: { publicKey: Uint8Array; secretKey: Uint8Array }) => {
+    try {
+      console.log('🧪 Ejecutando test de determinismo...');
+      
+      // Generar segundo par de claves con la misma semilla
+      const secondKeyPair = await keypairFromSeed(seedBytes);
+      
+      // Comparar claves públicas
+      const publicKeysMatch = constantTimeEquals(originalKeyPair.publicKey, secondKeyPair.publicKey);
+      // Comparar claves privadas
+      const secretKeysMatch = constantTimeEquals(originalKeyPair.secretKey, secondKeyPair.secretKey);
+      
+      if (publicKeysMatch && secretKeysMatch) {
+        setDeterministicTestResult("✅ DETERMINÍSTICO: Misma semilla → mismas claves");
+        console.log('✅ Test de determinismo: PASADO');
+      } else {
+        setDeterministicTestResult("❌ NO DETERMINÍSTICO: Claves diferentes con misma semilla");
+        console.warn('❌ Test de determinismo: FALLIDO');
+      }
+    } catch (error) {
+      console.error('❌ Error en test de determinismo:', error);
+      setDeterministicTestResult("❌ ERROR en test de determinismo");
+    }
+  };
+
+  // Funciones para prueba de firma Dilithium2
+  const signTestMessage = async () => {
+    if (!privateKey || algorithmType !== 'Dilithium2') {
+      toast({
+        title: "Error",
+        description: "Primero genera claves Dilithium2",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSigningTest(true);
+    try {
+      const messageBytes = new TextEncoder().encode(testMessage);
+      const secretKeyBytes = fromHex(toHex(privateKey));
+      
+      console.log('🔐 Firmando mensaje de prueba...');
+      const signature = await dilithiumSign(messageBytes, secretKeyBytes);
+      
+      setTestSignature({
+        hex: toHex(signature),
+        base64: toBase64(signature),
+        bytes: signature
+      });
+      
+      setTestVerifyResult(null); // Reset verificación
+      
+      toast({
+        title: "Mensaje firmado",
+        description: `Firma generada: ${signature.length} bytes`,
+      });
+    } catch (error) {
+      console.error('❌ Error firmando:', error);
+      toast({
+        title: "Error",
+        description: `Error al firmar: ${error instanceof Error ? error.message : 'Error desconocido'}`,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSigningTest(false);
+    }
+  };
+
+  const verifyTestSignature = async () => {
+    if (!testSignature || !publicKey || algorithmType !== 'Dilithium2') {
+      toast({
+        title: "Error",
+        description: "Primero firma un mensaje",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const messageBytes = new TextEncoder().encode(testMessage);
+      const publicKeyBytes = fromHex(toHex(publicKey));
+      
+      console.log('🔍 Verificando firma...');
+      const isValid = await dilithiumVerify(messageBytes, testSignature.bytes!, publicKeyBytes);
+      
+      setTestVerifyResult(isValid ? "✅ Válida" : "❌ Inválida");
+      
+      toast({
+        title: "Verificación completa",
+        description: `Firma: ${isValid ? 'VÁLIDA' : 'INVÁLIDA'}`,
+        variant: isValid ? "default" : "destructive",
+      });
+    } catch (error) {
+      console.error('❌ Error verificando:', error);
+      setTestVerifyResult("❌ Error");
+      toast({
+        title: "Error",
+        description: `Error al verificar: ${error instanceof Error ? error.message : 'Error desconocido'}`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const runSelfTest = async () => {
+    if (!privateKey || !publicKey || algorithmType !== 'Dilithium2') {
+      toast({
+        title: "Error",
+        description: "Primero genera claves Dilithium2",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const secretKeyBytes = fromHex(toHex(privateKey));
+      const publicKeyBytes = fromHex(toHex(publicKey));
+      
+      console.log('🧪 Ejecutando auto-test completo...');
+      const result = await selfTest(testMessage, secretKeyBytes, publicKeyBytes);
+      
+      if (result.success && result.signature) {
+        setTestSignature({
+          hex: toHex(result.signature),
+          base64: toBase64(result.signature),
+          bytes: result.signature
+        });
+        setTestVerifyResult("✅ Válida (auto-test)");
+        
+        toast({
+          title: "Auto-test exitoso",
+          description: "Firma y verificación funcionan correctamente",
+        });
+      } else {
+        setTestVerifyResult("❌ Fallo en auto-test");
+        toast({
+          title: "Auto-test falló",
+          description: result.error || "Error desconocido",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error en auto-test:', error);
+      toast({
+        title: "Error en auto-test",
+        description: error instanceof Error ? error.message : 'Error desconocido',
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <div className="space-y-6">
