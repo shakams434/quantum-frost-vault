@@ -10,6 +10,7 @@ export interface IdentityRecord {
   vmId: string;
   createdAt: string;
   generationType: 'QRNG' | 'PRNG';
+  algorithmType?: 'Ed25519' | 'Dilithium2';
 }
 
 const STORAGE_KEY = 'poc-custodia-identities';

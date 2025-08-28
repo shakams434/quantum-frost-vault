@@ -1,8 +1,10 @@
-import { useState } from "react"
+import { useState, lazy, Suspense } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { AlertCircle, Key, Copy, Trash2, Download, Save } from "lucide-react"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { AlertCircle, Key, Copy, Trash2, Download, Save, Shield, ShieldCheck } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "@/hooks/use-toast"
 import { ed } from '../crypto-setup'
@@ -18,6 +20,8 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+
+// Lazy load Dilithium for code splitting (removed since we're using direct import)
 
 // Utility functions
 function rand32(): Uint8Array { 
@@ -145,10 +149,12 @@ export default function Onboarding() {
   const [didKey, setDidKey] = useState("")
   const [userDID, setUserDID] = useState("")
   const [generationMethod, setGenerationMethod] = useState<'QRNG' | 'PRNG'>('PRNG')
+  const [algorithmType, setAlgorithmType] = useState<'Ed25519' | 'Dilithium2'>('Ed25519')
   const [verificationMetadata, setVerificationMetadata] = useState<any>(null)
   const [entropyAnalysis, setEntropyAnalysis] = useState<any>(null)
   const [showVerificationDetails, setShowVerificationDetails] = useState(false)
   const [showEntropyDetails, setShowEntropyDetails] = useState(false)
+  const [isDilithiumLoading, setIsDilithiumLoading] = useState(false)
   
   // State for save dialog
   const [showSaveDialog, setShowSaveDialog] = useState(false)
@@ -230,26 +236,30 @@ export default function Onboarding() {
     }
   }
 
-  // Derive Ed25519 keys from seed
+  // Derive keys from seed based on algorithm type
   const deriveKeys = async () => {
     if (!seed) return
     
     try {
       console.log("Deriving keys from seed:", toHex(seed))
       
-      // For Ed25519, the private key IS the seed (32 bytes)
-      const newPrivateKey = seed
-      const newPublicKey = await ed.getPublicKey(newPrivateKey)
-      
-      console.log("Private key (seed):", toHex(newPrivateKey))
-      console.log("Public key derived:", toHex(new Uint8Array(newPublicKey)))
-      
-      setPrivateKey(newPrivateKey)
-      setPublicKey(new Uint8Array(newPublicKey))
+      if (algorithmType === 'Ed25519') {
+        // For Ed25519, the private key IS the seed (32 bytes)
+        const newPrivateKey = seed
+        const newPublicKey = await ed.getPublicKey(newPrivateKey)
+        
+        console.log("Private key (seed):", toHex(newPrivateKey))
+        console.log("Public key derived:", toHex(new Uint8Array(newPublicKey)))
+        
+        setPrivateKey(newPrivateKey)
+        setPublicKey(new Uint8Array(newPublicKey))
+      } else if (algorithmType === 'Dilithium2') {
+        await deriveDilithiumKeys()
+      }
       
       toast({
         title: "Claves derivadas",
-        description: "Se derivaron las claves Ed25519 desde la semilla"
+        description: `Se derivaron las claves ${algorithmType} desde la semilla`
       })
     } catch (error) {
       console.error("Error deriving keys:", error)
@@ -261,22 +271,58 @@ export default function Onboarding() {
     }
   }
 
-  // Build DID did:key
+  // Derive Dilithium2 keys from seed
+  const deriveDilithiumKeys = async () => {
+    setIsDilithiumLoading(true)
+    try {
+      const DilithiumModule = await import('dilithium-crystals')
+      
+      // Generate Dilithium2 keypair - the method doesn't take parameters
+      const keyPair = await DilithiumModule.dilithium.keyPair()
+      
+      setPrivateKey(keyPair.privateKey)
+      setPublicKey(keyPair.publicKey)
+      
+      console.log("Dilithium2 Private key size:", keyPair.privateKey.length)
+      console.log("Dilithium2 Public key size:", keyPair.publicKey.length)
+    } catch (error) {
+      console.error('Error generating Dilithium keys:', error)
+      toast({
+        title: "Error",
+        description: "Error al generar claves Dilithium",
+        variant: "destructive"
+      })
+      throw error
+    } finally {
+      setIsDilithiumLoading(false)
+    }
+  }
+
+  // Build DID did:key based on algorithm type
   const buildDidKey = () => {
     if (!publicKey) return
     
     try {
-      const MULTICODEC_ED25519_PUB = new Uint8Array([0xED, 0x01])
-      const didPayload = new Uint8Array(2 + publicKey.length)
-      didPayload.set(MULTICODEC_ED25519_PUB, 0)
-      didPayload.set(publicKey, 2)
+      let multicodecPrefix: Uint8Array
+      
+      if (algorithmType === 'Ed25519') {
+        // Ed25519 multicodec prefix: 0xED01
+        multicodecPrefix = new Uint8Array([0xED, 0x01])
+      } else {
+        // Dilithium2 experimental multicodec prefix: 0x1234
+        multicodecPrefix = new Uint8Array([0x12, 0x34])
+      }
+      
+      const didPayload = new Uint8Array(multicodecPrefix.length + publicKey.length)
+      didPayload.set(multicodecPrefix, 0)
+      didPayload.set(publicKey, multicodecPrefix.length)
       const multibasePub = 'z' + base58btc.encode(didPayload)
       const did = `did:key:${multibasePub}`
       
       setDidKey(did)
       toast({
         title: "DID construido",
-        description: "Se construyó el DID did:key desde la clave pública"
+        description: `Se construyó el DID did:key ${algorithmType} desde la clave pública`
       })
     } catch (error) {
       toast({
@@ -322,7 +368,8 @@ export default function Onboarding() {
         multibase,
         vmId,
         createdAt: new Date().toISOString(),
-        generationType: generationMethod
+        generationType: generationMethod,
+        algorithmType
       })
 
       toast({
@@ -349,11 +396,13 @@ export default function Onboarding() {
     setDidKey("")
     setUserDID("")
     setGenerationMethod('PRNG')
+    setAlgorithmType('Ed25519')
     setIdentityName("")
     setVerificationMetadata(null)
     setEntropyAnalysis(null)
     setShowVerificationDetails(false)
     setShowEntropyDetails(false)
+    setIsDilithiumLoading(false)
     toast({
       title: "Memoria limpiada",
       description: "Se borró toda la información criptográfica"
@@ -376,6 +425,7 @@ export default function Onboarding() {
     const data = {
       timestamp: new Date().toISOString(),
       generationType: generationMethod,
+      algorithmType,
       verification: verificationMetadata,
       entropy: entropyAnalysis,
       seed: {
@@ -386,14 +436,16 @@ export default function Onboarding() {
       },
       keys: {
         privateKey: privateKey ? toHex(privateKey) : "",
-        publicKey: publicKey ? toHex(publicKey) : ""
+        publicKey: publicKey ? toHex(publicKey) : "",
+        privateKeySize: privateKey ? privateKey.length : 0,
+        publicKeySize: publicKey ? publicKey.length : 0
       },
       identity: {
         didKey,
         userDID: userDID || didKey,
         verificationMethod: didKey ? {
           id: `${didKey}#${didKey.split(':')[2]}`,
-          type: "Ed25519VerificationKey2020",
+          type: algorithmType === 'Ed25519' ? "Ed25519VerificationKey2020" : "Dilithium2VerificationKey2024",
           publicKeyMultibase: didKey.split(':')[2]
         } : null
       }
@@ -580,28 +632,53 @@ export default function Onboarding() {
           </CardContent>
         </Card>
 
-        {/* Ed25519 Keys */}
+        {/* Cryptographic Keys */}
         <Card>
           <CardHeader>
-            <CardTitle>Claves Ed25519</CardTitle>
+            <CardTitle>Claves Criptográficas</CardTitle>
             <CardDescription>
-              Ed25519 usa semilla de 32 bytes; internamente (SHA-512 + clamping) deriva el escalar secreto.
+              {algorithmType === 'Ed25519' 
+                ? "Ed25519 usa semilla de 32 bytes; internamente (SHA-512 + clamping) deriva el escalar secreto."
+                : "Dilithium2 es un algoritmo post-cuántico con claves más grandes (~1.3KB pública, ~2.5KB privada)."}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Algorithm Selection */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Algoritmo Criptográfico</Label>
+              <RadioGroup value={algorithmType} onValueChange={(value: 'Ed25519' | 'Dilithium2') => setAlgorithmType(value)}>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="Ed25519" id="ed25519" />
+                  <Label htmlFor="ed25519" className="flex items-center gap-2 cursor-pointer">
+                    <Shield className="h-4 w-4" />
+                    Ed25519 (Clásico) - ~32 bytes
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="Dilithium2" id="dilithium2" />
+                  <Label htmlFor="dilithium2" className="flex items-center gap-2 cursor-pointer">
+                    <ShieldCheck className="h-4 w-4" />
+                    Dilithium2 (Post-Cuántico) - ~1.3KB pub, ~2.5KB priv
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+
             <Button 
               onClick={deriveKeys} 
-              disabled={!seed}
+              disabled={!seed || isDilithiumLoading}
               className="w-full"
             >
-              Derivar clave privada (desde la semilla de 32B)
+              {isDilithiumLoading ? 'Cargando Dilithium...' : `Derivar claves ${algorithmType}`}
             </Button>
 
             {privateKey && (
               <div className="space-y-4">
                 <div>
                   <div className="flex justify-between items-center mb-2">
-                    <Label className="text-sm font-medium">Private key (seed) – 32 bytes (hex):</Label>
+                    <Label className="text-sm font-medium">
+                      Private key {algorithmType === 'Dilithium2' ? `(~${Math.round(privateKey.length/1024 * 10)/10}KB)` : '(32 bytes)'} (hex):
+                    </Label>
                     <Button 
                       size="sm" 
                       variant="outline"
@@ -612,9 +689,17 @@ export default function Onboarding() {
                     </Button>
                   </div>
                   <div className="p-3 bg-muted rounded-md">
-                    <p className="font-mono text-sm break-all">
-                      {toHex(privateKey)}
-                    </p>
+                    {algorithmType === 'Dilithium2' ? (
+                      <ScrollArea className="h-32 w-full">
+                        <p className="font-mono text-xs break-all whitespace-pre-wrap">
+                          {toHex(privateKey)}
+                        </p>
+                      </ScrollArea>
+                    ) : (
+                      <p className="font-mono text-sm break-all">
+                        {toHex(privateKey)}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -622,7 +707,9 @@ export default function Onboarding() {
                   <>
                     <div>
                       <div className="flex justify-between items-center mb-2">
-                        <Label className="text-sm font-medium">Public key – 32 bytes (hex):</Label>
+                        <Label className="text-sm font-medium">
+                          Public key {algorithmType === 'Dilithium2' ? `(~${Math.round(publicKey.length/1024 * 10)/10}KB)` : '(32 bytes)'} (hex):
+                        </Label>
                         <Button 
                           size="sm" 
                           variant="outline"
@@ -633,9 +720,17 @@ export default function Onboarding() {
                         </Button>
                       </div>
                       <div className="p-3 bg-muted rounded-md">
-                        <p className="font-mono text-sm break-all">
-                          {toHex(publicKey)}
-                        </p>
+                        {algorithmType === 'Dilithium2' ? (
+                          <ScrollArea className="h-24 w-full">
+                            <p className="font-mono text-xs break-all whitespace-pre-wrap">
+                              {toHex(publicKey)}
+                            </p>
+                          </ScrollArea>
+                        ) : (
+                          <p className="font-mono text-sm break-all">
+                            {toHex(publicKey)}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -652,9 +747,17 @@ export default function Onboarding() {
                         </Button>
                       </div>
                       <div className="p-3 bg-muted rounded-md">
-                        <p className="font-mono text-sm break-all">
-                          {toBase64(publicKey)}
-                        </p>
+                        {algorithmType === 'Dilithium2' ? (
+                          <ScrollArea className="h-24 w-full">
+                            <p className="font-mono text-xs break-all whitespace-pre-wrap">
+                              {toBase64(publicKey)}
+                            </p>
+                          </ScrollArea>
+                        ) : (
+                          <p className="font-mono text-sm break-all">
+                            {toBase64(publicKey)}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </>
@@ -664,12 +767,14 @@ export default function Onboarding() {
           </CardContent>
         </Card>
 
-        {/* DID did:key (Ed25519) */}
+        {/* DID did:key */}
         <Card>
           <CardHeader>
-            <CardTitle>DID did:key (Ed25519)</CardTitle>
+            <CardTitle>DID did:key ({algorithmType})</CardTitle>
             <CardDescription>
-              did:key = multicodec 0xED01 + publicKey(32B) → base58btc con prefijo z (multibase).
+              {algorithmType === 'Ed25519' 
+                ? "did:key = multicodec 0xED01 + publicKey(32B) → base58btc con prefijo z (multibase)."
+                : "did:key = multicodec experimental 0x1234 + publicKey(~1.3KB) → base58btc con prefijo z (multibase)."}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -686,18 +791,20 @@ export default function Onboarding() {
                 <div>
                   <Label className="text-sm font-medium mb-2 block">Pasos y valores:</Label>
                   <div className="space-y-2 text-sm">
-                    <p><strong>Prefijo multicodec ed25519-pub:</strong> 0xED 0x01 (2B)</p>
+                    <p><strong>Prefijo multicodec {algorithmType}:</strong> {algorithmType === 'Ed25519' ? '0xED 0x01 (2B)' : '0x12 0x34 (2B experimental)'}</p>
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <span><strong>Payload (34B) = prefijo + publicKey:</strong></span>
+                        <span><strong>Payload = prefijo + publicKey:</strong></span>
                         <Button 
                           size="sm" 
                           variant="outline"
                           onClick={() => {
-                            const MULTICODEC_ED25519_PUB = new Uint8Array([0xED, 0x01])
-                            const didPayload = new Uint8Array(2 + publicKey.length)
-                            didPayload.set(MULTICODEC_ED25519_PUB, 0)
-                            didPayload.set(publicKey, 2)
+                            const multicodecPrefix = algorithmType === 'Ed25519' 
+                              ? new Uint8Array([0xED, 0x01])
+                              : new Uint8Array([0x12, 0x34])
+                            const didPayload = new Uint8Array(multicodecPrefix.length + publicKey.length)
+                            didPayload.set(multicodecPrefix, 0)
+                            didPayload.set(publicKey, multicodecPrefix.length)
                             copyToClipboard(toHex(didPayload), "Payload")
                           }}
                         >
@@ -705,14 +812,30 @@ export default function Onboarding() {
                           Copiar
                         </Button>
                       </div>
-                      <div className="p-2 bg-muted rounded text-xs font-mono break-all">
-                        {(() => {
-                          const MULTICODEC_ED25519_PUB = new Uint8Array([0xED, 0x01])
-                          const didPayload = new Uint8Array(2 + publicKey.length)
-                          didPayload.set(MULTICODEC_ED25519_PUB, 0)
-                          didPayload.set(publicKey, 2)
-                          return toHex(didPayload)
-                        })()}
+                      <div className="p-2 bg-muted rounded text-xs font-mono">
+                        {algorithmType === 'Dilithium2' ? (
+                          <ScrollArea className="h-16 w-full">
+                            <p className="break-all whitespace-pre-wrap">
+                              {(() => {
+                                const multicodecPrefix = new Uint8Array([0x12, 0x34])
+                                const didPayload = new Uint8Array(multicodecPrefix.length + publicKey.length)
+                                didPayload.set(multicodecPrefix, 0)
+                                didPayload.set(publicKey, multicodecPrefix.length)
+                                return toHex(didPayload)
+                              })()}
+                            </p>
+                          </ScrollArea>
+                        ) : (
+                          <p className="break-all">
+                            {(() => {
+                              const multicodecPrefix = new Uint8Array([0xED, 0x01])
+                              const didPayload = new Uint8Array(multicodecPrefix.length + publicKey.length)
+                              didPayload.set(multicodecPrefix, 0)
+                              didPayload.set(publicKey, multicodecPrefix.length)
+                              return toHex(didPayload)
+                            })()}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div>
@@ -843,6 +966,10 @@ export default function Onboarding() {
                 <div>
                   <span className="text-muted-foreground">Tipo:</span>
                   <span className="ml-1 font-medium">{generationMethod}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Algoritmo:</span>
+                  <span className="ml-1 font-medium">{algorithmType}</span>
                 </div>
               </div>
             </div>
