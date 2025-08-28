@@ -24,6 +24,23 @@ function rand32(): Uint8Array {
   return a; 
 }
 
+// Fetch quantum random numbers from ANU QRNG API
+async function fetchQRNG(): Promise<Uint8Array> {
+  const response = await fetch('https://qrng.anu.edu.au/API/jsonI.php?length=32&type=uint8')
+  
+  if (!response.ok) {
+    throw new Error(`API QRNG falló: ${response.status} ${response.statusText}`)
+  }
+  
+  const data = await response.json()
+  
+  if (!data.success || !Array.isArray(data.data) || data.data.length !== 32) {
+    throw new Error('Respuesta inválida de la API QRNG')
+  }
+  
+  return new Uint8Array(data.data)
+}
+
 const toHex = (u: Uint8Array) => [...u].map(b => b.toString(16).padStart(2, '0')).join('');
 const toBits = (u: Uint8Array) => [...u].map(b => b.toString(2).padStart(8, '0')).join('');
 const toBase64 = (u: Uint8Array) => btoa(String.fromCharCode(...u));
@@ -44,19 +61,44 @@ export default function Onboarding() {
   const [identityName, setIdentityName] = useState("")
 
   // Generate 256-bit cryptographic seed
-  const generateSeed = (method: 'QRNG' | 'PRNG') => {
-    const newSeed = rand32()
-    setSeed(newSeed)
-    setGenerationMethod(method)
-    // Clear derived keys when generating new seed
-    setPrivateKey(null)
-    setPublicKey(null)
-    setDidKey("")
-    setUserDID("")
-    toast({
-      title: "Semilla generada",
-      description: `Se generó una nueva semilla criptográfica de 256 bits usando ${method}`
-    })
+  const generateSeed = async (method: 'QRNG' | 'PRNG') => {
+    try {
+      let newSeed: Uint8Array
+      
+      if (method === 'QRNG') {
+        // Use real ANU QRNG API
+        newSeed = await fetchQRNG()
+        toast({
+          title: "Semilla QRNG generada",
+          description: "Se generó una nueva semilla usando números cuánticos reales de ANU"
+        })
+      } else {
+        // Use browser's crypto API (PRNG)
+        newSeed = rand32()
+        toast({
+          title: "Semilla PRNG generada",
+          description: "Se generó una nueva semilla usando WebCrypto (PRNG)"
+        })
+      }
+      
+      setSeed(newSeed)
+      setGenerationMethod(method)
+      // Clear derived keys when generating new seed
+      setPrivateKey(null)
+      setPublicKey(null)
+      setDidKey("")
+      setUserDID("")
+      
+    } catch (error) {
+      console.error(`Error generating seed with ${method}:`, error)
+      toast({
+        title: "Error al generar semilla",
+        description: method === 'QRNG' 
+          ? `Fallo en API QRNG: ${error.message}. Prueba con PRNG como alternativa.`
+          : `Error en generación PRNG: ${error.message}`,
+        variant: "destructive"
+      })
+    }
   }
 
   // Derive Ed25519 keys from seed
@@ -236,16 +278,16 @@ export default function Onboarding() {
           <CardHeader>
             <CardTitle>Semilla criptográfica (256 bits = 32 bytes)</CardTitle>
             <CardDescription>
-              Se genera localmente con window.crypto.getRandomValues. Esta semilla se usa tal cual para Ed25519.
+              QRNG usa números cuánticos reales de ANU. PRNG usa window.crypto.getRandomValues local.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <Button onClick={() => generateSeed('QRNG')} className="w-full">
-                QRNG (256 bits)
+                QRNG Real (ANU)
               </Button>
               <Button onClick={() => generateSeed('PRNG')} className="w-full" variant="outline">
-                PRNG Simulado (256 bits)
+                PRNG (WebCrypto)
               </Button>
             </div>
 
