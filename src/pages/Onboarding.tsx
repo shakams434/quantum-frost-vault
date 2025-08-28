@@ -17,6 +17,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 // Utility functions
 function rand32(): Uint8Array { 
@@ -25,8 +26,83 @@ function rand32(): Uint8Array {
   return a; 
 }
 
+const toHex = (u: Uint8Array) => [...u].map(b => b.toString(16).padStart(2, '0')).join('');
+const toBits = (u: Uint8Array) => [...u].map(b => b.toString(2).padStart(8, '0')).join('');
+const toBase64 = (u: Uint8Array) => btoa(String.fromCharCode(...u));
+const to32BytesDisplay = (bytes: Uint8Array): string => {
+  const byteArray = Array.from(bytes);
+  let result = '';
+  for (let i = 0; i < byteArray.length; i++) {
+    if (i > 0 && i % 16 === 0) result += '\n';
+    else if (i > 0) result += ' ';
+    result += byteArray[i].toString().padStart(3, ' ');
+  }
+  return result;
+};
+
+// Entropy analysis functions
+const calculateShannonEntropy = (bytes: Uint8Array): number => {
+  const frequencies = new Array(256).fill(0);
+  for (const byte of bytes) {
+    frequencies[byte]++;
+  }
+  
+  let entropy = 0;
+  const length = bytes.length;
+  for (const freq of frequencies) {
+    if (freq > 0) {
+      const probability = freq / length;
+      entropy -= probability * Math.log2(probability);
+    }
+  }
+  return entropy;
+};
+
+const calculateUniformityTest = (bytes: Uint8Array): number => {
+  const frequencies = new Array(256).fill(0);
+  for (const byte of bytes) {
+    frequencies[byte]++;
+  }
+  
+  const expected = bytes.length / 256;
+  let chiSquared = 0;
+  for (const freq of frequencies) {
+    chiSquared += Math.pow(freq - expected, 2) / expected;
+  }
+  
+  // Convert to percentage (lower chi-squared = more uniform)
+  const maxChiSquared = bytes.length * 255;
+  return Math.max(0, 100 - (chiSquared / maxChiSquared) * 100);
+};
+
+const calculateEntropyScore = (bytes: Uint8Array): number => {
+  const shannonEntropy = calculateShannonEntropy(bytes);
+  const uniformity = calculateUniformityTest(bytes);
+  
+  // Shannon entropy for perfectly random 8-bit data should be close to 8
+  const entropyScore = (shannonEntropy / 8) * 100;
+  
+  // Combine both metrics
+  return Math.round((entropyScore + uniformity) / 2);
+};
+
+const analyzeEntropy = (bytes: Uint8Array) => {
+  const shannonEntropy = calculateShannonEntropy(bytes);
+  const uniformity = calculateUniformityTest(bytes);
+  const qualityScore = calculateEntropyScore(bytes);
+  
+  return {
+    shannonEntropy: shannonEntropy.toFixed(4),
+    uniformity: uniformity.toFixed(2),
+    qualityScore,
+    interpretation: qualityScore >= 90 ? 'Excelente' : 
+                   qualityScore >= 75 ? 'Buena' : 
+                   qualityScore >= 60 ? 'Aceptable' : 'Baja'
+  };
+};
+
 // Fetch quantum random numbers from Supabase Edge Function
-async function fetchQRNG(): Promise<Uint8Array> {
+async function fetchQRNG(): Promise<{ data: Uint8Array, metadata?: any }> {
   console.log('🔄 Iniciando fetch a Edge Function QRNG...')
   
   try {
@@ -48,17 +124,16 @@ async function fetchQRNG(): Promise<Uint8Array> {
     }
     
     console.log('✅ Datos QRNG válidos recibidos via Edge Function');
-    return new Uint8Array(data.data);
+    return {
+      data: new Uint8Array(data.data),
+      metadata: data.metadata
+    };
     
   } catch (error) {
     console.error('❌ Error en fetchQRNG via Edge Function:', error);
     throw error;
   }
 }
-
-const toHex = (u: Uint8Array) => [...u].map(b => b.toString(16).padStart(2, '0')).join('');
-const toBits = (u: Uint8Array) => [...u].map(b => b.toString(2).padStart(8, '0')).join('');
-const toBase64 = (u: Uint8Array) => btoa(String.fromCharCode(...u));
 
 export default function Onboarding() {
   console.log("Onboarding component rendering");
@@ -70,6 +145,10 @@ export default function Onboarding() {
   const [didKey, setDidKey] = useState("")
   const [userDID, setUserDID] = useState("")
   const [generationMethod, setGenerationMethod] = useState<'QRNG' | 'PRNG'>('PRNG')
+  const [verificationMetadata, setVerificationMetadata] = useState<any>(null)
+  const [entropyAnalysis, setEntropyAnalysis] = useState<any>(null)
+  const [showVerificationDetails, setShowVerificationDetails] = useState(false)
+  const [showEntropyDetails, setShowEntropyDetails] = useState(false)
   
   // State for save dialog
   const [showSaveDialog, setShowSaveDialog] = useState(false)
@@ -82,7 +161,14 @@ export default function Onboarding() {
       
       if (method === 'QRNG') {
         // Use Supabase Edge Function for QRNG
-        newSeed = await fetchQRNG()
+        const result = await fetchQRNG()
+        newSeed = result.data
+        
+        // Store verification metadata
+        if (result.metadata) {
+          setVerificationMetadata(result.metadata)
+        }
+        
         setSeed(newSeed)
         setGenerationMethod(method)
         // Clear derived keys when generating new seed
@@ -97,6 +183,18 @@ export default function Onboarding() {
       } else {
         // Use browser's crypto API (PRNG)
         newSeed = rand32()
+        
+        // Generate metadata for PRNG
+        setVerificationMetadata({
+          verificationId: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          responseTime: 1, // PRNG is instant
+          source: 'Browser Web Crypto API',
+          endpoint: 'crypto.getRandomValues()',
+          parameters: { length: 32, type: 'uint8' },
+          generationType: 'PRNG'
+        })
+        
         setSeed(newSeed)
         setGenerationMethod(method)
         // Clear derived keys when generating new seed
@@ -109,6 +207,10 @@ export default function Onboarding() {
           description: "Se generó una semilla usando el generador pseudoaleatorio del navegador."
         })
       }
+      
+      // Analyze entropy of the generated seed
+      const analysis = analyzeEntropy(newSeed)
+      setEntropyAnalysis(analysis)
       
     } catch (error) {
       console.error(`Error generating seed with ${method}:`, error)
@@ -248,6 +350,10 @@ export default function Onboarding() {
     setUserDID("")
     setGenerationMethod('PRNG')
     setIdentityName("")
+    setVerificationMetadata(null)
+    setEntropyAnalysis(null)
+    setShowVerificationDetails(false)
+    setShowEntropyDetails(false)
     toast({
       title: "Memoria limpiada",
       description: "Se borró toda la información criptográfica"
@@ -268,24 +374,43 @@ export default function Onboarding() {
     if (!seed) return
     
     const data = {
-      seed_hex: seed ? toHex(seed) : "",
-      private_key_seed_hex: privateKey ? toHex(privateKey) : "",
-      public_key_hex: publicKey ? toHex(publicKey) : "",
-      did_key: didKey,
-      verificationMethod: didKey ? {
-        id: `${didKey}#${didKey.split(':')[2]}`,
-        type: "Ed25519VerificationKey2020",
-        publicKeyMultibase: didKey.split(':')[2]
-      } : null
+      timestamp: new Date().toISOString(),
+      generationType: generationMethod,
+      verification: verificationMetadata,
+      entropy: entropyAnalysis,
+      seed: {
+        hex: toHex(seed),
+        base64: toBase64(seed),
+        bits: toBits(seed),
+        bytes32: to32BytesDisplay(seed)
+      },
+      keys: {
+        privateKey: privateKey ? toHex(privateKey) : "",
+        publicKey: publicKey ? toHex(publicKey) : ""
+      },
+      identity: {
+        didKey,
+        userDID: userDID || didKey,
+        verificationMethod: didKey ? {
+          id: `${didKey}#${didKey.split(':')[2]}`,
+          type: "Ed25519VerificationKey2020",
+          publicKeyMultibase: didKey.split(':')[2]
+        } : null
+      }
     }
     
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'ed25519-keys.json'
+    a.download = `cryptographic-identity-${Date.now()}.json`
     a.click()
     URL.revokeObjectURL(url)
+    
+    toast({
+      title: "Descarga completada",
+      description: "El archivo JSON con las claves ha sido descargado."
+    })
   }
 
   return (
@@ -318,8 +443,61 @@ export default function Onboarding() {
               </Button>
             </div>
 
+            {verificationMetadata && (
+              <div className="mt-4">
+                <Collapsible open={showVerificationDetails} onOpenChange={setShowVerificationDetails}>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" className="flex items-center justify-between w-full p-0">
+                      <span className="text-sm font-medium">📊 Metadata de Verificación</span>
+                      <span className="text-xs">{showVerificationDetails ? '▼' : '▶'}</span>
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-2 space-y-2">
+                    <div className="p-3 bg-muted rounded-md space-y-2 text-xs">
+                      <div><strong>ID de Verificación:</strong> {verificationMetadata.verificationId}</div>
+                      <div><strong>Timestamp:</strong> {new Date(verificationMetadata.timestamp).toLocaleString()}</div>
+                      <div><strong>Fuente:</strong> {verificationMetadata.source}</div>
+                      <div><strong>Tiempo de Respuesta:</strong> {verificationMetadata.responseTime}ms</div>
+                      <div><strong>Tipo:</strong> {verificationMetadata.generationType}</div>
+                      {verificationMetadata.responseHash && (
+                        <div><strong>Hash de Respuesta:</strong> <span className="font-mono break-all">{verificationMetadata.responseHash}</span></div>
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            )}
+
+            {entropyAnalysis && (
+              <div className="mt-4">
+                <Collapsible open={showEntropyDetails} onOpenChange={setShowEntropyDetails}>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" className="flex items-center justify-between w-full p-0">
+                      <span className="text-sm font-medium">🎲 Análisis de Entropía</span>
+                      <span className="text-xs">{showEntropyDetails ? '▼' : '▶'}</span>
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-2">
+                    <div className="p-3 bg-muted rounded-md space-y-2 text-xs">
+                      <div><strong>Entropía de Shannon:</strong> {entropyAnalysis.shannonEntropy} bits</div>
+                      <div><strong>Test de Uniformidad:</strong> {entropyAnalysis.uniformity}%</div>
+                      <div><strong>Score de Calidad:</strong> 
+                        <span className={`ml-1 font-bold ${
+                          entropyAnalysis.qualityScore >= 90 ? 'text-green-600' :
+                          entropyAnalysis.qualityScore >= 75 ? 'text-yellow-600' :
+                          'text-red-600'
+                        }`}>
+                          {entropyAnalysis.qualityScore}% ({entropyAnalysis.interpretation})
+                        </span>
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            )}
+
             {seed && (
-              <div className="space-y-4">
+              <div className="space-y-4 mt-6">
                 <div>
                   <div className="flex justify-between items-center mb-2">
                     <Label className="text-sm font-medium">Bits (256):</Label>
@@ -365,6 +543,25 @@ export default function Onboarding() {
                   <div className="p-3 bg-muted rounded-md">
                     <p className="font-mono text-sm break-all">
                       {toBase64(seed)}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <Label className="text-sm font-medium">32 Bytes:</Label>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => copyToClipboard(to32BytesDisplay(seed), "32 bytes")}
+                    >
+                      <Copy className="h-3 w-3 mr-1" />
+                      Copiar
+                    </Button>
+                  </div>
+                  <div className="p-3 bg-muted rounded-md">
+                    <p className="font-mono text-sm whitespace-pre-wrap">
+                      {to32BytesDisplay(seed)}
                     </p>
                   </div>
                 </div>
