@@ -8,6 +8,7 @@ import { toast } from "@/hooks/use-toast"
 import { ed } from '../crypto-setup'
 import { base58btc } from 'multiformats/bases/base58'
 import { identityStorage } from "@/services/identityStorage"
+import { supabase } from "@/integrations/supabase/client"
 import { 
   Dialog,
   DialogContent,
@@ -24,66 +25,34 @@ function rand32(): Uint8Array {
   return a; 
 }
 
-// Fetch quantum random numbers from ANU QRNG API
+// Fetch quantum random numbers from Supabase Edge Function
 async function fetchQRNG(): Promise<Uint8Array> {
-  console.log('🔄 Iniciando fetch a ANU QRNG API...')
+  console.log('🔄 Iniciando fetch a Edge Function QRNG...')
   
   try {
-    const url = 'https://qrng.anu.edu.au/API/jsonI.php?length=32&type=uint8'
-    console.log('📡 URL:', url)
+    const { data, error } = await supabase.functions.invoke('qrng-anu');
     
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
-      // Add timeout and other fetch options
-      signal: AbortSignal.timeout(10000) // 10 second timeout
-    })
-    
-    console.log('📥 Response status:', response.status)
-    console.log('📥 Response headers:', Object.fromEntries(response.headers.entries()))
-    
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('❌ Response not OK:', errorText)
-      throw new Error(`API QRNG falló: ${response.status} ${response.statusText} - ${errorText}`)
+    if (error) {
+      console.error('❌ Supabase function error:', error);
+      throw new Error(`Edge function error: ${error.message}`);
     }
     
-    const data = await response.json()
-    console.log('📊 Response data:', data)
-    
-    if (!data.success) {
-      console.error('❌ API returned success=false:', data)
-      throw new Error(`API QRNG reportó fallo: ${JSON.stringify(data)}`)
-    }
-    
-    if (!Array.isArray(data.data)) {
-      console.error('❌ data.data no es array:', typeof data.data, data.data)
-      throw new Error('Respuesta inválida: data.data no es un array')
+    if (!data || !data.data || !Array.isArray(data.data)) {
+      console.error('❌ Invalid data format:', data);
+      throw new Error('Invalid data format from quantum service');
     }
     
     if (data.data.length !== 32) {
-      console.error('❌ Longitud incorrecta:', data.data.length)
-      throw new Error(`Longitud incorrecta: esperaba 32 bytes, recibió ${data.data.length}`)
+      console.error('❌ Longitud incorrecta:', data.data.length);
+      throw new Error(`Longitud incorrecta: esperaba 32 bytes, recibió ${data.data.length}`);
     }
     
-    console.log('✅ Datos QRNG válidos recibidos:', data.data.length, 'bytes')
-    return new Uint8Array(data.data)
+    console.log('✅ Datos QRNG válidos recibidos via Edge Function');
+    return new Uint8Array(data.data);
     
   } catch (error) {
-    console.error('❌ Error en fetchQRNG:', error)
-    
-    // Improved error handling for different types of errors
-    if (error.name === 'TimeoutError') {
-      throw new Error('Timeout: La API de ANU QRNG no respondió en 10 segundos')
-    } else if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-      throw new Error('Error de conexión: No se pudo conectar a ANU QRNG (posible problema de CORS o red)')
-    } else if (error.message.includes('API QRNG')) {
-      throw error // Re-throw our custom API errors
-    } else {
-      throw new Error(`Error desconocido: ${error.message}`)
-    }
+    console.error('❌ Error en fetchQRNG via Edge Function:', error);
+    throw error;
   }
 }
 
@@ -112,38 +81,50 @@ export default function Onboarding() {
       let newSeed: Uint8Array
       
       if (method === 'QRNG') {
-        // Use real ANU QRNG API
+        // Use Supabase Edge Function for QRNG
         newSeed = await fetchQRNG()
+        setSeed(newSeed)
+        setGenerationMethod(method)
+        // Clear derived keys when generating new seed
+        setPrivateKey(null)
+        setPublicKey(null)
+        setDidKey("")
+        setUserDID("")
         toast({
-          title: "Semilla QRNG generada",
-          description: "Se generó una nueva semilla usando números cuánticos reales de ANU"
+          title: "Semilla cuántica generada",
+          description: "Se generó una semilla usando el generador cuántico de ANU."
         })
       } else {
         // Use browser's crypto API (PRNG)
         newSeed = rand32()
+        setSeed(newSeed)
+        setGenerationMethod(method)
+        // Clear derived keys when generating new seed
+        setPrivateKey(null)
+        setPublicKey(null)
+        setDidKey("")
+        setUserDID("")
         toast({
-          title: "Semilla PRNG generada",
-          description: "Se generó una nueva semilla usando WebCrypto (PRNG)"
+          title: "Semilla pseudoaleatoria generada",
+          description: "Se generó una semilla usando el generador pseudoaleatorio del navegador."
         })
       }
       
-      setSeed(newSeed)
-      setGenerationMethod(method)
-      // Clear derived keys when generating new seed
-      setPrivateKey(null)
-      setPublicKey(null)
-      setDidKey("")
-      setUserDID("")
-      
     } catch (error) {
       console.error(`Error generating seed with ${method}:`, error)
-      toast({
-        title: "Error al generar semilla",
-        description: method === 'QRNG' 
-          ? `Fallo en API QRNG: ${error.message}. Prueba con PRNG como alternativa.`
-          : `Error en generación PRNG: ${error.message}`,
-        variant: "destructive"
-      })
+      if (method === 'QRNG') {
+        toast({
+          title: "Error",
+          description: "No se pudo obtener la semilla cuántica, intente nuevamente",
+          variant: "destructive"
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: "No se pudo generar la semilla. Intente nuevamente.",
+          variant: "destructive"
+        })
+      }
     }
   }
 
