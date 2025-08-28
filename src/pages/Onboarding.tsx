@@ -26,19 +26,65 @@ function rand32(): Uint8Array {
 
 // Fetch quantum random numbers from ANU QRNG API
 async function fetchQRNG(): Promise<Uint8Array> {
-  const response = await fetch('https://qrng.anu.edu.au/API/jsonI.php?length=32&type=uint8')
+  console.log('🔄 Iniciando fetch a ANU QRNG API...')
   
-  if (!response.ok) {
-    throw new Error(`API QRNG falló: ${response.status} ${response.statusText}`)
+  try {
+    const url = 'https://qrng.anu.edu.au/API/jsonI.php?length=32&type=uint8'
+    console.log('📡 URL:', url)
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+      // Add timeout and other fetch options
+      signal: AbortSignal.timeout(10000) // 10 second timeout
+    })
+    
+    console.log('📥 Response status:', response.status)
+    console.log('📥 Response headers:', Object.fromEntries(response.headers.entries()))
+    
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('❌ Response not OK:', errorText)
+      throw new Error(`API QRNG falló: ${response.status} ${response.statusText} - ${errorText}`)
+    }
+    
+    const data = await response.json()
+    console.log('📊 Response data:', data)
+    
+    if (!data.success) {
+      console.error('❌ API returned success=false:', data)
+      throw new Error(`API QRNG reportó fallo: ${JSON.stringify(data)}`)
+    }
+    
+    if (!Array.isArray(data.data)) {
+      console.error('❌ data.data no es array:', typeof data.data, data.data)
+      throw new Error('Respuesta inválida: data.data no es un array')
+    }
+    
+    if (data.data.length !== 32) {
+      console.error('❌ Longitud incorrecta:', data.data.length)
+      throw new Error(`Longitud incorrecta: esperaba 32 bytes, recibió ${data.data.length}`)
+    }
+    
+    console.log('✅ Datos QRNG válidos recibidos:', data.data.length, 'bytes')
+    return new Uint8Array(data.data)
+    
+  } catch (error) {
+    console.error('❌ Error en fetchQRNG:', error)
+    
+    // Improved error handling for different types of errors
+    if (error.name === 'TimeoutError') {
+      throw new Error('Timeout: La API de ANU QRNG no respondió en 10 segundos')
+    } else if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+      throw new Error('Error de conexión: No se pudo conectar a ANU QRNG (posible problema de CORS o red)')
+    } else if (error.message.includes('API QRNG')) {
+      throw error // Re-throw our custom API errors
+    } else {
+      throw new Error(`Error desconocido: ${error.message}`)
+    }
   }
-  
-  const data = await response.json()
-  
-  if (!data.success || !Array.isArray(data.data) || data.data.length !== 32) {
-    throw new Error('Respuesta inválida de la API QRNG')
-  }
-  
-  return new Uint8Array(data.data)
 }
 
 const toHex = (u: Uint8Array) => [...u].map(b => b.toString(16).padStart(2, '0')).join('');
