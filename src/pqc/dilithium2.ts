@@ -24,6 +24,9 @@ export async function keypairFromSeed(seed32: Uint8Array): Promise<DilithiumKeyP
   }
 
   try {
+    console.log('🔧 Dilithium2: Iniciando generación determinística...');
+    console.log(`📋 Semilla de entrada: ${seed32.length} bytes`);
+    
     // Carga diferida del módulo WASM
     const dilithiumModule = await import('dilithium-crystals');
     
@@ -34,12 +37,14 @@ export async function keypairFromSeed(seed32: Uint8Array): Promise<DilithiumKeyP
     // La librería solo tiene keyPair() que no acepta parámetros
     
     // MÉTODO 2: RNG determinístico (implementación actual)
-    console.log('⚠️ Usando RNG determinístico - keyPairFromSeed no disponible');
+    console.log('⚠️ Usando RNG determinístico - keyPairFromSeed no disponible en librería');
     
-    // Crear RNG determinístico
+    // Paso 1: Crear RNG determinístico desde la semilla
+    console.log('🔑 Paso 1: Creando RNG determinístico con KDF SHAKE256...');
     const deterministicRNG = createDeterministicRNG(seed32, "DILITHIUM2-RNG");
     
-    // Sobrescribir crypto.getRandomValues temporalmente
+    // Paso 2: Sobrescribir crypto.getRandomValues temporalmente
+    console.log('🔧 Paso 2: Interceptando crypto.getRandomValues...');
     const originalGetRandomValues = crypto.getRandomValues;
     let rngCallCount = 0;
     
@@ -51,16 +56,23 @@ export async function keypairFromSeed(seed32: Uint8Array): Promise<DilithiumKeyP
     };
     
     try {
-      // Generar par de claves con RNG determinístico
+      // Paso 3: Generar par de claves con RNG determinístico
+      console.log('🔐 Paso 3: Generando par de claves Dilithium2...');
       const keyPair = await dilithium.keyPair();
       console.log(`🔧 RNG calls interceptadas: ${rngCallCount}`);
+      
+      // Paso 4: Validar y retornar
+      console.log('✅ Paso 4: Claves generadas exitosamente');
+      console.log(`   Clave privada: ${keyPair.privateKey.length} bytes`);
+      console.log(`   Clave pública: ${keyPair.publicKey.length} bytes`);
       
       return {
         publicKey: keyPair.publicKey,
         secretKey: keyPair.privateKey  // dilithium-crystals usa 'privateKey', no 'secretKey'
       };
     } finally {
-      // Restaurar crypto.getRandomValues original
+      // Paso 5: Restaurar crypto.getRandomValues original
+      console.log('🔧 Paso 5: Restaurando crypto.getRandomValues original');
       crypto.getRandomValues = originalGetRandomValues;
     }
     

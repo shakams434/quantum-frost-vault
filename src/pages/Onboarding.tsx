@@ -299,8 +299,10 @@ export default function Onboarding() {
     setIsDilithiumLoading(true);
     try {
       console.log('🔧 Generando claves Dilithium2 desde semilla determinísticamente...');
+      console.log('📋 Semilla (32 bytes):', toHex(seed));
       
-      // Usar la función determinística con la semilla
+      // Paso 1: Usar la semilla para generar el par de claves determinísticamente
+      console.log('🔑 Paso 1: Expandiendo semilla con KDF SHAKE256...');
       const keyPair = await keypairFromSeed(seed);
       
       // Validar tamaños de clave
@@ -308,18 +310,28 @@ export default function Onboarding() {
         throw new Error("Tamaños de clave inválidos");
       }
       
+      // Paso 2: Mostrar la clave privada generada
+      console.log('🔐 Paso 2: Clave privada generada desde semilla:');
+      console.log(`   Tamaño: ${keyPair.secretKey.length} bytes`);
+      console.log(`   Hex: ${toHex(keyPair.secretKey).substring(0, 64)}...`);
+      
+      // Paso 3: Mostrar la clave pública derivada  
+      console.log('🔓 Paso 3: Clave pública derivada de la privada:');
+      console.log(`   Tamaño: ${keyPair.publicKey.length} bytes`);
+      console.log(`   Hex: ${toHex(keyPair.publicKey).substring(0, 64)}...`);
+      
       setPrivateKey(keyPair.secretKey);
       setPublicKey(keyPair.publicKey);
       
       const keyInfo = getDilithiumKeyInfo();
-      console.log(`✅ Claves generadas: PK=${keyPair.publicKey.length}B, SK=${keyPair.secretKey.length}B`);
+      console.log(`✅ Proceso completado: SK=${keyPair.secretKey.length}B, PK=${keyPair.publicKey.length}B`);
       
       // Test de determinismo automático
       await testDeterminism(seed, keyPair);
       
       toast({
         title: "Claves Dilithium2 generadas",
-        description: `PK: ${keyPair.publicKey.length}B, SK: ${keyPair.secretKey.length}B (determinístico)`,
+        description: `Derivación: Semilla(32B) → SK(${keyPair.secretKey.length}B) → PK(${keyPair.publicKey.length}B)`,
       });
     } catch (error) {
       console.error('❌ Error generando claves Dilithium2:', error);
