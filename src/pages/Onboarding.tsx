@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { AlertCircle, Key, Copy, Trash2, Download, Save, Shield, ShieldCheck } from "lucide-react"
+import { AlertCircle, Key, Copy, Trash2, Download, Save, Shield, ShieldCheck, ChevronDown, ChevronUp, Edit, TestTube, Loader2, AlertTriangle } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "@/hooks/use-toast"
 import { ed } from '../crypto-setup'
@@ -285,67 +285,111 @@ export default function Onboarding() {
     }
   }
 
-  // Derive Dilithium2 keys from seed
+  // Derive Dilithium2 keys deterministically from seed
   const deriveDilithiumKeys = async () => {
-    setIsDilithiumLoading(true)
-    try {
-      const DilithiumModule = await import('dilithium-crystals')
-      
-      // Generate Dilithium2 keypair - the method doesn't take parameters
-      const keyPair = await DilithiumModule.dilithium.keyPair()
-      
-      setPrivateKey(keyPair.privateKey)
-      setPublicKey(keyPair.publicKey)
-      
-      console.log("Dilithium2 Private key size:", keyPair.privateKey.length)
-      console.log("Dilithium2 Public key size:", keyPair.publicKey.length)
-    } catch (error) {
-      console.error('Error generating Dilithium keys:', error)
+    if (!seed) {
       toast({
         title: "Error",
-        description: "Error al generar claves Dilithium",
-        variant: "destructive"
-      })
-      throw error
-    } finally {
-      setIsDilithiumLoading(false)
+        description: "Primero genera una semilla",
+        variant: "destructive",
+      });
+      return;
     }
-  }
+    
+    setIsDilithiumLoading(true);
+    try {
+      console.log('🔧 Generando claves Dilithium2 desde semilla determinísticamente...');
+      
+      // Usar la función determinística con la semilla
+      const keyPair = await keypairFromSeed(seed);
+      
+      // Validar tamaños de clave
+      if (!validateKeyPair(keyPair.publicKey, keyPair.secretKey)) {
+        throw new Error("Tamaños de clave inválidos");
+      }
+      
+      setPrivateKey(keyPair.secretKey);
+      setPublicKey(keyPair.publicKey);
+      
+      const keyInfo = getDilithiumKeyInfo();
+      console.log(`✅ Claves generadas: PK=${keyPair.publicKey.length}B, SK=${keyPair.secretKey.length}B`);
+      
+      // Test de determinismo automático
+      await testDeterminism(seed, keyPair);
+      
+      toast({
+        title: "Claves Dilithium2 generadas",
+        description: `PK: ${keyPair.publicKey.length}B, SK: ${keyPair.secretKey.length}B (determinístico)`,
+      });
+    } catch (error) {
+      console.error('❌ Error generando claves Dilithium2:', error);
+      toast({
+        title: "Error",
+        description: `Error al generar claves Dilithium2: ${error instanceof Error ? error.message : 'Error desconocido'}`,
+        variant: "destructive",
+      });
+    } finally {
+      setIsDilithiumLoading(false);
+    }
+  };
 
   // Build DID did:key based on algorithm type
   const buildDidKey = () => {
-    if (!publicKey) return
-    
-    try {
-      let multicodecPrefix: Uint8Array
-      
-      if (algorithmType === 'Ed25519') {
-        // Ed25519 multicodec prefix: 0xED01
-        multicodecPrefix = new Uint8Array([0xED, 0x01])
-      } else {
-        // Dilithium2 experimental multicodec prefix: 0x1234
-        multicodecPrefix = new Uint8Array([0x12, 0x34])
-      }
-      
-      const didPayload = new Uint8Array(multicodecPrefix.length + publicKey.length)
-      didPayload.set(multicodecPrefix, 0)
-      didPayload.set(publicKey, multicodecPrefix.length)
-      const multibasePub = 'z' + base58btc.encode(didPayload)
-      const did = `did:key:${multibasePub}`
-      
-      setDidKey(did)
-      toast({
-        title: "DID construido",
-        description: `Se construyó el DID did:key ${algorithmType} desde la clave pública`
-      })
-    } catch (error) {
+    if (!publicKey) {
       toast({
         title: "Error",
-        description: "No se pudo construir el DID",
-        variant: "destructive"
-      })
+        description: "Primero deriva las claves",
+        variant: "destructive",
+      });
+      return;
     }
-  }
+
+    try {
+      let did: string;
+      let multibase: string;
+      let vmId: string;
+      
+      if (algorithmType === 'Ed25519') {
+        // Ed25519 multicodec prefix (0xed = 237)
+        const multicodecPrefix = new Uint8Array([0xed, 0x01]);
+        const multicodecAndKey = new Uint8Array(multicodecPrefix.length + publicKey.length);
+        multicodecAndKey.set(multicodecPrefix, 0);
+        multicodecAndKey.set(publicKey, multicodecPrefix.length);
+        
+        multibase = "z" + base58btc.encode(multicodecAndKey);
+        did = `did:key:${multibase}`;
+        vmId = `${did}#${multibase}`;
+      } else {
+        // Dilithium2 - usar función especializada con multicodec experimental
+        const didResult = didKeyDilithium(publicKey);
+        
+        did = didResult.did;
+        multibase = didResult.multibase;
+        vmId = didResult.verificationMethodId;
+        
+        // Test T3: Verificar formato DID:key
+        if (!did.startsWith('did:key:z')) {
+          console.warn('❌ T3 FALLO: DID no tiene formato correcto');
+        } else {
+          console.log('✅ T3 PASADO: DID:key formato correcto');
+        }
+      }
+      
+      setDidKey(did);
+      
+      toast({
+        title: "DID construido",
+        description: `DID:key generado con ${algorithmType}${algorithmType === 'Dilithium2' ? ' (experimental)' : ''}`,
+      });
+    } catch (error) {
+      console.error('❌ Error building DID:', error);
+      toast({
+        title: "Error",
+        description: "Error al construir DID",
+        variant: "destructive",
+      });
+    }
+  };
 
   // Generate user DID from existing did:key
   const generateUserDID = () => {
@@ -365,13 +409,13 @@ export default function Onboarding() {
         title: "Error",
         description: "Faltan datos para guardar la identidad",
         variant: "destructive"
-      })
-      return
+      });
+      return;
     }
 
     try {
-      const multibase = userDID.split(':')[2]
-      const vmId = `${userDID}#${multibase}`
+      const multibase = userDID.split(':')[2];
+      const vmId = `${userDID}#${multibase}`;
       
       const identityId = identityStorage.saveIdentity({
         customName: identityName.trim() || undefined,
@@ -384,44 +428,51 @@ export default function Onboarding() {
         createdAt: new Date().toISOString(),
         generationType: generationMethod,
         algorithmType
-      })
+      });
 
       toast({
         title: "Identidad guardada",
         description: `Identidad guardada correctamente${identityName ? ` como "${identityName}"` : ''}`
-      })
+      });
 
-      setShowSaveDialog(false)
-      setIdentityName("")
+      setShowSaveDialog(false);
+      setIdentityName("");
     } catch (error) {
       toast({
         title: "Error",
         description: "No se pudo guardar la identidad",
         variant: "destructive"
-      })
+      });
     }
-  }
+  };
 
   // Clear all data from memory
   const clearMemory = () => {
-    setSeed(null)
-    setPrivateKey(null)
-    setPublicKey(null)
-    setDidKey("")
-    setUserDID("")
-    setGenerationMethod('PRNG')
-    setAlgorithmType('Ed25519')
-    setIdentityName("")
-    setVerificationMetadata(null)
-    setEntropyAnalysis(null)
-    setShowVerificationDetails(false)
-    setShowEntropyDetails(false)
-    setIsDilithiumLoading(false)
+    setSeed(null);
+    setPrivateKey(null);
+    setPublicKey(null);
+    setDidKey("");
+    setUserDID("");
+    setGenerationMethod('PRNG');
+    setAlgorithmType('Ed25519');
+    setIdentityName("");
+    setVerificationMetadata(null);
+    setEntropyAnalysis(null);
+    setShowVerificationDetails(false);
+    setShowEntropyDetails(false);
+    setIsDilithiumLoading(false);
+    
+    // Limpiar estados de prueba Dilithium
+    setTestMessage("Hello, Post-Quantum World!");
+    setTestSignature(null);
+    setTestVerifyResult(null);
+    setDeterministicTestResult(null);
+    
     toast({
       title: "Memoria limpiada",
       description: "Se borró toda la información criptográfica"
-    })
-  }
+    });
+  };
 
   // Copy to clipboard
   const copyToClipboard = (text: string, label: string) => {
@@ -432,11 +483,14 @@ export default function Onboarding() {
     })
   }
 
-  // Download JSON
+  // Download JSON with complete identity data
   const downloadJson = () => {
-    if (!seed) return
+    if (!seed) return;
+    
+    const keyInfo = algorithmType === 'Dilithium2' ? getDilithiumKeyInfo() : null;
     
     const data = {
+      version: "1.0.0",
       timestamp: new Date().toISOString(),
       generationType: generationMethod,
       algorithmType,
@@ -462,50 +516,79 @@ export default function Onboarding() {
           type: algorithmType === 'Ed25519' ? "Ed25519VerificationKey2020" : "Dilithium2VerificationKey2024",
           publicKeyMultibase: didKey.split(':')[2]
         } : null
+      },
+      // Información específica para Dilithium2
+      keyInfo: keyInfo ? {
+        algorithm: keyInfo.algorithm,
+        publicKeySize: keyInfo.publicKeySize,
+        secretKeySize: keyInfo.secretKeySize,
+        signatureSize: keyInfo.signatureSize,
+        securityLevel: keyInfo.securityLevel,
+        quantumResistant: keyInfo.quantumResistant,
+        experimental: keyInfo.experimental
+      } : {
+        algorithm: "Ed25519",
+        quantumResistant: false,
+        experimental: false
+      },
+      // Resultados de tests para Dilithium2
+      testResults: algorithmType === 'Dilithium2' ? {
+        deterministicTest: deterministicTestResult,
+        lastSignatureTest: testSignature ? {
+          message: testMessage,
+          signatureHex: testSignature.hex,
+          signatureBase64: testSignature.base64,
+          verificationResult: testVerifyResult
+        } : null
+      } : null,
+      metadata: {
+        description: "Identity export from POC Custodia Digital",
+        warning: "Keep this file secure - contains private cryptographic material",
+        dilithiumWarning: algorithmType === 'Dilithium2' ? "EXPERIMENTAL: Using temporary multicodec 0x1234 for Dilithium2" : undefined
       }
-    }
+    };
     
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `cryptographic-identity-${Date.now()}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `identity-${algorithmType}-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
     
     toast({
       title: "Descarga completada",
-      description: "El archivo JSON con las claves ha sido descargado."
-    })
-  }
+      description: `Identidad ${algorithmType} exportada exitosamente`,
+    });
+  };
 
-  // Test de determinismo para Dilithium2
+  // Test de determinismo para Dilithium2 (T1)
   const testDeterminism = async (seedBytes: Uint8Array, originalKeyPair: { publicKey: Uint8Array; secretKey: Uint8Array }) => {
     try {
-      console.log('🧪 Ejecutando test de determinismo...');
+      console.log('🧪 T1: Ejecutando test de determinismo...');
       
       // Generar segundo par de claves con la misma semilla
       const secondKeyPair = await keypairFromSeed(seedBytes);
       
-      // Comparar claves públicas
+      // Comparar claves públicas y privadas
       const publicKeysMatch = constantTimeEquals(originalKeyPair.publicKey, secondKeyPair.publicKey);
-      // Comparar claves privadas
       const secretKeysMatch = constantTimeEquals(originalKeyPair.secretKey, secondKeyPair.secretKey);
       
       if (publicKeysMatch && secretKeysMatch) {
-        setDeterministicTestResult("✅ DETERMINÍSTICO: Misma semilla → mismas claves");
-        console.log('✅ Test de determinismo: PASADO');
+        setDeterministicTestResult("✅ T1 PASADO: Misma semilla → mismas claves");
+        console.log('✅ T1 Test de determinismo: PASADO');
       } else {
-        setDeterministicTestResult("❌ NO DETERMINÍSTICO: Claves diferentes con misma semilla");
-        console.warn('❌ Test de determinismo: FALLIDO');
+        setDeterministicTestResult("❌ T1 FALLO: Claves diferentes con misma semilla");
+        console.warn('❌ T1 Test de determinismo: FALLIDO');
+        console.warn('PK match:', publicKeysMatch, 'SK match:', secretKeysMatch);
       }
     } catch (error) {
-      console.error('❌ Error en test de determinismo:', error);
-      setDeterministicTestResult("❌ ERROR en test de determinismo");
+      console.error('❌ Error en T1 test de determinismo:', error);
+      setDeterministicTestResult("❌ T1 ERROR en test de determinismo");
     }
   };
 
-  // Funciones para prueba de firma Dilithium2
+  // Funciones para prueba de firma Dilithium2 (T2)
   const signTestMessage = async () => {
     if (!privateKey || algorithmType !== 'Dilithium2') {
       toast({
@@ -521,12 +604,12 @@ export default function Onboarding() {
       const messageBytes = new TextEncoder().encode(testMessage);
       const secretKeyBytes = fromHex(toHex(privateKey));
       
-      console.log('🔐 Firmando mensaje de prueba...');
+      console.log('🔐 T2: Firmando mensaje de prueba...');
       const signature = await dilithiumSign(messageBytes, secretKeyBytes);
       
       setTestSignature({
-        hex: toHex(signature),
-        base64: toBase64(signature),
+        hex: pqcToHex(signature),
+        base64: pqcToBase64(signature),
         bytes: signature
       });
       
@@ -537,7 +620,7 @@ export default function Onboarding() {
         description: `Firma generada: ${signature.length} bytes`,
       });
     } catch (error) {
-      console.error('❌ Error firmando:', error);
+      console.error('❌ Error en T2 firmando:', error);
       toast({
         title: "Error",
         description: `Error al firmar: ${error instanceof Error ? error.message : 'Error desconocido'}`,
@@ -562,10 +645,13 @@ export default function Onboarding() {
       const messageBytes = new TextEncoder().encode(testMessage);
       const publicKeyBytes = fromHex(toHex(publicKey));
       
-      console.log('🔍 Verificando firma...');
+      console.log('🔍 T2: Verificando firma...');
       const isValid = await dilithiumVerify(messageBytes, testSignature.bytes!, publicKeyBytes);
       
-      setTestVerifyResult(isValid ? "✅ Válida" : "❌ Inválida");
+      const result = isValid ? "✅ T2 PASADO: Válida" : "❌ T2 FALLO: Inválida";
+      setTestVerifyResult(result);
+      
+      console.log(isValid ? '✅ T2 Verificación: PASADA' : '❌ T2 Verificación: FALLIDA');
       
       toast({
         title: "Verificación completa",
@@ -573,8 +659,8 @@ export default function Onboarding() {
         variant: isValid ? "default" : "destructive",
       });
     } catch (error) {
-      console.error('❌ Error verificando:', error);
-      setTestVerifyResult("❌ Error");
+      console.error('❌ Error en T2 verificando:', error);
+      setTestVerifyResult("❌ T2 ERROR");
       toast({
         title: "Error",
         description: `Error al verificar: ${error instanceof Error ? error.message : 'Error desconocido'}`,
@@ -597,23 +683,25 @@ export default function Onboarding() {
       const secretKeyBytes = fromHex(toHex(privateKey));
       const publicKeyBytes = fromHex(toHex(publicKey));
       
-      console.log('🧪 Ejecutando auto-test completo...');
+      console.log('🧪 T2: Ejecutando auto-test completo...');
       const result = await selfTest(testMessage, secretKeyBytes, publicKeyBytes);
       
       if (result.success && result.signature) {
         setTestSignature({
-          hex: toHex(result.signature),
-          base64: toBase64(result.signature),
+          hex: pqcToHex(result.signature),
+          base64: pqcToBase64(result.signature),
           bytes: result.signature
         });
-        setTestVerifyResult("✅ Válida (auto-test)");
+        setTestVerifyResult("✅ T2 PASADO: Válida (auto-test)");
         
+        console.log('✅ T2 Auto-test: PASADO');
         toast({
           title: "Auto-test exitoso",
-          description: "Firma y verificación funcionan correctamente",
+          description: "T2: verify(sign(msg, sk), msg, pk) === true",
         });
       } else {
-        setTestVerifyResult("❌ Fallo en auto-test");
+        setTestVerifyResult("❌ T2 FALLO: Auto-test");
+        console.error('❌ T2 Auto-test: FALLIDO -', result.error);
         toast({
           title: "Auto-test falló",
           description: result.error || "Error desconocido",
@@ -621,7 +709,7 @@ export default function Onboarding() {
         });
       }
     } catch (error) {
-      console.error('❌ Error en auto-test:', error);
+      console.error('❌ Error en T2 auto-test:', error);
       toast({
         title: "Error en auto-test",
         description: error instanceof Error ? error.message : 'Error desconocido',
@@ -1044,6 +1132,161 @@ export default function Onboarding() {
             )}
           </CardContent>
         </Card>
+
+        {/* Test de Firma Dilithium2 */}
+        {algorithmType === 'Dilithium2' && privateKey && publicKey && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TestTube className="h-5 w-5" />
+                🧪 Prueba de Firma (Dilithium2)
+              </CardTitle>
+              <CardDescription>
+                Verificar funcionalidad de firma/verificación con el par de claves generado
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Test Results Summary */}
+              {deterministicTestResult && (
+                <div className={`border rounded-lg p-3 ${deterministicTestResult.includes('✅') ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                  <div className="text-sm font-mono">
+                    {deterministicTestResult}
+                  </div>
+                </div>
+              )}
+
+              {/* Message Input */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Mensaje de Prueba:</Label>
+                <Input
+                  value={testMessage}
+                  onChange={(e) => setTestMessage(e.target.value)}
+                  placeholder="Ingresa un mensaje para firmar..."
+                  maxLength={100}
+                />
+                <p className="text-xs text-muted-foreground">Máximo 100 caracteres</p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex space-x-2">
+                <Button 
+                  onClick={signTestMessage}
+                  disabled={!testMessage || isSigningTest}
+                  className="flex-1"
+                >
+                  {isSigningTest ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Firmando...
+                    </>
+                  ) : (
+                    <>
+                      <Edit className="mr-2 h-4 w-4" />
+                      Firmar
+                    </>
+                  )}
+                </Button>
+                
+                <Button 
+                  onClick={verifyTestSignature}
+                  disabled={!testSignature}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  <Shield className="mr-2 h-4 w-4" />
+                  Verificar
+                </Button>
+                
+                <Button 
+                  onClick={runSelfTest}
+                  disabled={isSigningTest}
+                  variant="secondary"
+                  title="Ejecutar test automático: firmar → verificar"
+                >
+                  <TestTube className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {/* Signature Display */}
+              {testSignature && (
+                <div className="space-y-3">
+                  <div>
+                    <Label className="text-sm font-medium">Firma (Hex):</Label>
+                    <ScrollArea className="h-16 w-full border rounded-md">
+                      <div className="p-2">
+                        <code className="text-xs break-all font-mono">{testSignature.hex}</code>
+                      </div>
+                    </ScrollArea>
+                    <div className="flex justify-between items-center mt-1">
+                      <span className="text-xs text-muted-foreground">
+                        {testSignature.hex.length} hex chars ({testSignature.hex.length/2} bytes)
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => copyToClipboard(testSignature.hex, "Firma (hex)")}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-sm font-medium">Firma (Base64):</Label>
+                    <ScrollArea className="h-16 w-full border rounded-md">
+                      <div className="p-2">
+                        <code className="text-xs break-all font-mono">{testSignature.base64}</code>
+                      </div>
+                    </ScrollArea>
+                    <div className="flex justify-end mt-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => copyToClipboard(testSignature.base64, "Firma (base64)")}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Verification Result */}
+              {testVerifyResult && (
+                <div className={`border rounded-lg p-3 ${testVerifyResult.includes('✅') ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm font-medium">Resultado de Verificación:</span>
+                    <span className="text-sm font-mono">{testVerifyResult}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Test Criteria Info */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="text-sm text-blue-800">
+                  <p className="font-medium">Criterios de Validación:</p>
+                  <ul className="mt-1 space-y-1 text-xs">
+                    <li>• T1: Determinismo - Misma semilla → mismas claves</li>
+                    <li>• T2: Firma/Verificación - verify(sign(msg, sk), msg, pk) === true</li>
+                    <li>• T3: DID:key formato - did:key:z... con multicodec 0x1234</li>
+                    <li>• T4: Export/Import - JSON completo con algorithmType</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Warning sobre estado experimental */}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <div className="flex items-start space-x-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-amber-800">
+                    <p className="font-medium">Implementación Experimental</p>
+                    <p>CRYSTALS-Dilithium2 usando multicodec temporal 0x1234. Las firmas varían entre ejecuciones (no determinísticas), pero la verificación es determinística.</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* User Identity */}
         <Card>
