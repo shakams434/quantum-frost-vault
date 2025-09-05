@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { AlertCircle, Key, Copy, Trash2, Download, Save, Shield, ShieldCheck, ChevronDown, ChevronUp, Edit, TestTube, Loader2, AlertTriangle } from "lucide-react"
+import { AlertCircle, Key, Copy, Trash2, Download, Save, Shield, ShieldCheck, ChevronDown, ChevronUp, Edit, TestTube, Loader2, AlertTriangle, Eye, EyeOff } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "@/hooks/use-toast"
 import { ed } from '../crypto-setup'
@@ -173,6 +173,7 @@ export default function Onboarding() {
   const [isSigningTest, setIsSigningTest] = useState(false)
   const [testVerifyResult, setTestVerifyResult] = useState<string | null>(null)
   const [deterministicTestResult, setDeterministicTestResult] = useState<string | null>(null)
+  const [showPrivateKey, setShowPrivateKey] = useState(false)
 
   // Generate 256-bit cryptographic seed
   const generateSeed = async (method: 'QRNG' | 'PRNG') => {
@@ -944,25 +945,45 @@ export default function Onboarding() {
                     <Label className="text-sm font-medium">
                       Private key {algorithmType === 'Dilithium2' ? `(~${Math.round(privateKey.length/1024 * 10)/10}KB)` : '(32 bytes)'} (hex):
                     </Label>
-                    <Button 
-                      size="sm" 
-                      variant="outline"
-                      onClick={() => copyToClipboard(toHex(privateKey), "Clave privada")}
-                    >
-                      <Copy className="h-3 w-3 mr-1" />
-                      Copiar
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => setShowPrivateKey(!showPrivateKey)}
+                      >
+                        {showPrivateKey ? (
+                          <EyeOff className="h-3 w-3 mr-1" />
+                        ) : (
+                          <Eye className="h-3 w-3 mr-1" />
+                        )}
+                        {showPrivateKey ? "Ocultar" : "Mostrar"}
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => copyToClipboard(toHex(privateKey), "Clave privada")}
+                      >
+                        <Copy className="h-3 w-3 mr-1" />
+                        Copiar
+                      </Button>
+                    </div>
                   </div>
                   <div className="p-3 bg-muted rounded-md">
-                    {algorithmType === 'Dilithium2' ? (
-                      <ScrollArea className="h-32 w-full">
-                        <p className="font-mono text-xs break-all whitespace-pre-wrap">
+                    {showPrivateKey ? (
+                      algorithmType === 'Dilithium2' ? (
+                        <ScrollArea className="h-32 w-full">
+                          <p className="font-mono text-xs break-all whitespace-pre-wrap">
+                            {toHex(privateKey)}
+                          </p>
+                        </ScrollArea>
+                      ) : (
+                        <p className="font-mono text-sm break-all">
                           {toHex(privateKey)}
                         </p>
-                      </ScrollArea>
+                      )
                     ) : (
-                      <p className="font-mono text-sm break-all">
-                        {toHex(privateKey)}
+                      <p className="font-mono text-sm text-muted-foreground">
+                        {"*".repeat(algorithmType === 'Dilithium2' ? 120 : 64)}
                       </p>
                     )}
                   </div>
