@@ -945,28 +945,18 @@ export default function Onboarding() {
                     <Label className="text-sm font-medium">
                       Private key {algorithmType === 'Dilithium2' ? `(~${Math.round(privateKey.length/1024 * 10)/10}KB)` : '(32 bytes)'} (hex):
                     </Label>
-                    <div className="flex gap-2">
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => setShowPrivateKey(!showPrivateKey)}
-                      >
-                        {showPrivateKey ? (
-                          <EyeOff className="h-3 w-3 mr-1" />
-                        ) : (
-                          <Eye className="h-3 w-3 mr-1" />
-                        )}
-                        {showPrivateKey ? "Ocultar" : "Mostrar"}
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => copyToClipboard(toHex(privateKey), "Clave privada")}
-                      >
-                        <Copy className="h-3 w-3 mr-1" />
-                        Copiar
-                      </Button>
-                    </div>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => setShowPrivateKey(!showPrivateKey)}
+                    >
+                      {showPrivateKey ? (
+                        <EyeOff className="h-3 w-3 mr-1" />
+                      ) : (
+                        <Eye className="h-3 w-3 mr-1" />
+                      )}
+                      {showPrivateKey ? "Ocultar" : "Mostrar solo por fines educativos"}
+                    </Button>
                   </div>
                   <div className="p-3 bg-muted rounded-md">
                     {showPrivateKey ? (
